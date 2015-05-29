@@ -1,0 +1,472 @@
+<endpoint name="data/inputs/gabq">
+	<header>GABQ</header>
+	<breadcrumb>
+		<parent hidecurrent="False">datainputstats</parent>
+		<name>GABQ</name>
+	</breadcrumb>
+	<elements>
+		<element name="sourceFields" type="fieldset">
+			<view name="list" />
+			<view name="edit" />
+			<view name="create" />
+			<elements>
+				<element name="name" label="GABQ Input Name">
+					<view name="list" />
+					<view name="create" />
+					<key name="exampleText">Name of this GABQ Input</key>
+				</element>
+
+				<element name="endpoint" type="textfield" label="Endpoint URL">
+
+					<view name="edit" />
+					<view name="create" />
+					<view name="list" />
+					<key name="exampleText">URL to send the HTTP GET request to</key>
+				</element>
+
+<element name="http_method" type="select" label="HTTP Method">
+					<onChange>
+
+						<key name="_action">showonly</key>
+						<group_set>
+							<group name="GET" />
+							<group name="POST_PUT" />
+							
+						</group_set>
+						<key name="GET">GET</key>
+						<key name="POST">POST_PUT</key>
+						<key name="PUT">POST_PUT</key>
+					</onChange>
+					<view name="edit" />
+					<view name="create" />
+					
+					<key name="exampleText">HTTP method to use.Defaults to GET. POST and PUT are not really RESTful for requesting data from the API, but useful to have the option for target APIs that are "REST like"</key>
+					<options>
+						<opt value="GET" label="GET" />
+						<opt value="POST" label="POST" />
+						<opt value="PUT" label="PUT" />
+					</options>
+				</element>
+
+				<element name="GET" type="fieldset" />
+				<element name="POST_PUT" type="fieldset">
+					
+					<view name="edit" />
+					<view name="create" />
+					<elements>
+						<element name="request_payload" type="textfield" label="Request Payload">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">Request payload for POST and PUT HTTP Methods</key>
+						</element>
+
+						
+					</elements>
+				</element>
+
+				<element name="auth_type" type="select" label="Authentication Type">
+					<onChange>
+
+						<key name="_action">showonly</key>
+						<group_set>
+							<group name="none" />
+							<group name="basic" />
+							<group name="oauth1" />
+							<group name="oauth2" />
+							<group name="custom" />
+						</group_set>
+						<key name="none">none</key>
+						<key name="basic">basic</key>
+						<key name="digest">basic</key>
+						<key name="oauth1">oauth1</key>
+						<key name="oauth2">oauth2</key>
+						<key name="custom">custom</key>
+					</onChange>
+					<view name="edit" />
+					<view name="create" />
+					<view name="list" />
+					<key name="exampleText">Authentication method to use</key>
+					<options>
+						<opt value="none" label="none" />
+						<opt value="basic" label="basic" />
+						<opt value="digest" label="digest" />
+						<opt value="oauth1" label="oauth1" />
+						<opt value="oauth2" label="oauth2" />
+						<opt value="custom" label="custom" />
+					</options>
+				</element>
+				<element name="none" type="fieldset" />
+				<element name="basic" type="fieldset">
+					
+					<view name="edit" />
+					<view name="create" />
+					<elements>
+						<element name="auth_user" type="textfield" label="Authentication User">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">Authentication user for BASIC or DIGEST auth</key>
+						</element>
+
+						<element name="auth_password" type="textfield"
+							label="Authentication Password">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">Authentication password for BASIC or DIGEST auth
+							</key>
+						</element>
+					</elements>
+				</element>
+				
+				<element name="custom" type="fieldset">
+					
+					<view name="edit" />
+					<view name="create" />
+					<elements>
+						<element name="custom_auth_handler" type="textfield" label="Custom Authentication Handler">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">Python classname of custom auth handler</key>
+						</element>
+
+						<element name="custom_auth_handler_args" type="textfield"
+							label="Custom Authentication Handler Arguments">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">Custom Authentication Handler arguments string ,  key=value,key2=value2</key>
+						</element>
+					</elements>
+				</element>
+				
+
+				<element name="oauth1" type="fieldset">
+					
+					<view name="edit" />
+					<view name="create" />
+					<elements>
+						<element name="oauth1_client_key" type="textfield"
+							label="OAUTH 1 Client Key">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">OAUTH 1 client key</key>
+						</element>
+						<element name="oauth1_client_secret" type="textfield"
+							label="OAUTH 1 Client Secret">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">OAUTH 1 client secret</key>
+						</element>
+						<element name="oauth1_access_token" type="textfield"
+							label="OAUTH 1 Access Token">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">OAUTH 1 access token</key>
+						</element>
+						<element name="oauth1_access_token_secret" type="textfield"
+							label="OAUTH 1 Access Token Secret">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">OAUTH 1 access token secret</key>
+						</element>
+					</elements>
+				</element>
+
+				<element name="oauth2" type="fieldset">
+					
+					<view name="edit" />
+					<view name="create" />
+					<elements>
+						<element name="oauth2_token_type" type="textfield"
+							label="OAUTH 2 Token Type">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">OAUTH 2 token type, defaults to "Bearer"</key>
+						</element>
+						<element name="oauth2_access_token" type="textfield"
+							label="OAUTH 2 Access Token">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">OAUTH 2 access token</key>
+						</element>
+						
+						<element name="oauth2_refresh_token" type="textfield"
+							label="OAUTH 2 Refresh Token">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">OAUTH 2 refresh token</key>
+						</element>
+						<element name="oauth2_refresh_url" type="textfield"
+							label="OAUTH 2 Token Refresh URL">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">OAUTH 2 token refresh URL</key>
+						</element>
+						<element name="oauth2_refresh_props" type="textfield"
+							label="OAUTH 2 Token Refresh Properties">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">OAUTH 2 token refresh properties :  key=value,key2=value2</key>
+						</element>
+						<element name="oauth2_client_id" type="textfield" label="OAUTH 2 Client ID">
+
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">OAUTH 2 client ID</key>
+						</element>
+						<element name="oauth2_client_secret" type="textfield" label="OAUTH 2 Client Secret">
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">OAUTH 2 client secret</key>
+						</element>
+						<element name="oauth2_refresh_interval" type="textfield" label="OAUTH 2 Token Refresh Interval">
+							<view name="edit" />
+							<view name="create" />
+							<key name="exampleText">OAUTH 2 token refresh interval</key>
+						</element>
+					</elements>
+
+				</element>
+				<element name="http_header_propertys" type="textfield"
+					label="HTTP Header Properties">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">Custom HTTP header properties : key=value,key2=value2
+					</key>
+				</element>
+				<element name="url_args" type="textfield" label="URL Arguments">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">Custom URL arguments : key=value,key2=value2</key>
+				</element>
+				<element name="response_type" type="select" label="Response Type">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">Rest Data Response Type, defaults to text</key>
+					<options>
+						<opt value="text" label="text" />
+						<opt value="json" label="json" />
+                                                <opt value="xml" label="xml" />
+					</options>
+				</element>
+				<element name="response_handler" type="textfield" label="Response Handler">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">Python classname of custom response handler, defaults to DefaultResponseHandler</key>
+				</element>
+				<element name="response_handler_args" type="textfield" label="Response Handler Arguments">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">Response Handler arguments string ,  key=value,key2=value2</key>
+				</element>
+				<element name="response_filter_pattern" type="textfield" label="Response Filter Pattern">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">Python Regex pattern, if present , the response will be scanned for this match pattern, and indexed if a match is present</key>
+				</element>
+				<element name="streaming_request" type="checkbox" label="Streaming Request ?">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">Whether or not this is a HTTP streaming request,
+						defaults to false
+					</key>
+
+				</element>
+				<element name="index_error_response_codes" type="checkbox"
+					label="Index Error Responses">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">Whether or not to index error response codes,
+						defaults to false
+					</key>
+
+				</element>
+				<element name="http_proxy" type="textfield" label="HTTP Proxy Address">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">HTTP proxy address, ie: http://10.10.1.10:3128 or
+						http://user:pass@10.10.1.10:3128</key>
+				</element>
+				<element name="https_proxy" type="textfield" label="HTTPs Proxy Address">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">HTTPs proxy address,ie: https://10.10.1.10:3128 or
+						https://user:pass@10.10.1.10:3128</key>
+				</element>
+				<element name="request_timeout" type="textfield" label="Request Timeout">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">Request Timeout in seconds , defaults to 30</key>
+				</element>
+				<element name="backoff_time" type="textfield" label="Backoff Time">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">Time in seconds to wait for retry after error or
+						timeout , defaults to 10</key>
+				</element>
+				<element name="polling_interval" type="textfield" label="Polling Interval">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">Polling interval in seconds , defaults to 60</key>
+				</element>
+                <element name="delimiter" type="textfield" label="Delimiter">
+
+					<view name="edit" />
+					<view name="create" />
+					<key name="exampleText">Delimiter to use for any multi "key=value" field inputs, defaults to ','</key>
+				</element>
+
+			</elements>
+		</element>
+
+
+
+		<element name="sourcetypeFields" type="fieldset">
+                      <view name="list"/>
+                      <view name="edit"/>
+                      <view name="create"/>
+                      <elements>
+                        <element name="spl-ctrl_sourcetypeSelect" type="select" label="Set sourcetype">
+                          <onChange>
+                            <!-- <key name="auto">NONE</key> -->
+                            <key name="_action">showonly</key>
+                            <group_set>
+                              <group name="sourcetype"/>
+                              <group name="spl-ctrl_from_list"/>
+                            </group_set>
+                            <key name="sourcetype">sourcetype</key>
+                            <key name="spl-ctrl_from_list">spl-ctrl_from_list</key>
+                          </onChange>
+                          <options>
+                            <!-- <opt value="auto" label="Automatic"/> -->
+                            <opt value="spl-ctrl_from_list" label="From list"/>
+                            <opt value="sourcetype" label="Manual"/>
+                          </options>
+                          <view name="edit"/>
+                          <view name="create"/>
+                          <!-- <key name="exampleText">Set to automatic and Splunk will classify and assign sourcetype automatically. Unknown sourcetypes will be given a placeholder name.</key> -->
+                          <key name="processValueEdit">[[ e for e in ['sourcetype'] if form_defaults.get(e) ][0]]</key>
+                          <key name="processValueAdd">[[ e for e in ['sourcetype'] if form_defaults.get(e) ][0]]</key>
+                        </element>
+                        <element name="sourcetype" type="textfield" label="Source type">
+                          <view name="list"/>
+                          <view name="edit"/>
+                          <view name="create"/>
+                          <key name="exampleText">If this field is left blank, the default value of script will be used for the source type.</key>
+                          <key name="processValueList">_('script') if (value==None or value=='') else value</key>
+                          <key name="submitValueAdd">form_data.get('spl-ctrl_from_list') if form_data.get('spl-ctrl_sourcetypeSelect')=='spl-ctrl_from_list' else value if form_data.get('spl-ctrl_sourcetypeSelect')=='sourcetype' else None</key>
+                          <key name="submitValueEdit">form_data.get('spl-ctrl_from_list') if form_data.get('spl-ctrl_sourcetypeSelect')=='spl-ctrl_from_list' else value if form_data.get('spl-ctrl_sourcetypeSelect')=='sourcetype' else None</key>
+                          <key name="labelList">Source type</key>
+                        </element>
+                        <element name="spl-ctrl_from_list" type="select" label="Select source type from list">
+    <view name="edit"/>
+                          <view name="create"/>
+                  <key name="exampleText">Splunk classifies all common data types automatically, but if you're looking for something specific, you can find more source types in the <![CDATA[<a href="../../../apps/remote">Splunkbase apps browser</a>]]> or online at <![CDATA[<a href="http://www.splunkbase.com/" target="_blank">www.splunkbase.com</a>]]>.</key>
+                          <key name="requiredIfVisible" />
+                          <key name="dynamicOptions" type="dict">
+                            <key name="keyName">title</key>
+                            <key name="keyValue">title</key>
+                            <key name="splunkSource">/saved/sourcetypes</key>
+                            <key name="splunkSourceParams" type="dict">
+                              <key name="count">-1</key>
+                              <key name="search">'pulldown_type=true'</key>
+                            </key>
+                            <key name="prefixOptions" type="list">
+                                <item type="list">
+                                    <item></item>
+                                    <item>Choose...</item>
+                                </item>
+                            </key>
+                          </key>
+                        </element>
+                      </elements>
+                      <key name="legend">Source type</key>
+                      <key name="helpText">Set sourcetype field for all events from this source.</key>
+                    </element>
+                            
+                            
+	<element name="spl-ctrl_EnableAdvanced" type="checkbox" label="More settings" class="spl-mgr-advanced-switch">
+        <view name="edit"/>
+        <view name="create"/>
+          <onChange>
+              <key name="_action">showonly</key>
+              <key name="0">NONE</key>
+              <key name="1">ALL</key>
+              <group_set>
+                <group name="advanced"/>
+              </group_set>
+          </onChange>
+    </element>
+	<element name="advanced" type="fieldset" class="spl-mgr-advanced-options">
+        <view name="edit"/>
+        <view name="create"/>
+        <elements>
+		    <element name="hostFields" type="fieldset">
+		      <key name="legend">Host</key>
+		      <view name="list"/>
+		      <view name="edit"/>
+		      <view name="create"/>
+		      <elements>
+		        <element name="host" type="textfield" label="Host field value">
+		          <view name="edit"/>
+		          <view name="create"/>
+		        </element>
+		      </elements>
+		    </element>  
+		    <element name="indexField" type="fieldset">
+		      <key name="legend">Index</key>
+		      <key name="helpText">Set the destination index for this source.</key>
+		      <view name="list"/>
+		      <view name="edit"/>
+		      <view name="create"/>
+		      <elements>
+		        <element name="index" type="select" label="Index">
+		          <view name="list"/>
+		          <view name="edit"/>
+		          <view name="create"/>
+		          <key name="dynamicOptions" type="dict">
+		            <key name="keyName">title</key>
+		            <key name="keyValue">title</key>
+		            <key name="splunkSource">/data/indexes</key>
+		            <key name="splunkSourceParams" type="dict">
+		              <key name="search">'isInternal=false disabled=false'</key>
+		              <key name="count">-1</key>
+		            </key>
+		          </key>
+		        </element>
+		      </elements>
+		    </element>
+		</elements>
+	</element>
+	<element name="eai:acl.app" label="App">
+      <view name="list"/>
+      <key name="processValueList">entity['eai:acl']['app'] or ""</key>
+    </element>
+
+  </elements>
+</endpoint>
