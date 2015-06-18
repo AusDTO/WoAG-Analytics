@@ -208,11 +208,14 @@ class GABQInput(Script):
 								if response.status_code != 200:
 									ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
 									break
-								else:
-									schemaDict = json.loads(response.text)
-									bq_tables_url = bq_ds_url + "/" + table['tableReference']['tableId'] + "/data"
+								schemaDict = json.loads(response.text)
+								bq_tables_url = bq_ds_url + "/" + table['tableReference']['tableId'] + "/data"
+								done = False
+								pageToken = ''
+								while not done:
 									try:
-										response = google_bq_sess.get(bq_tables_url)
+										if pageToken == '': response = google_bq_sess.get(bq_tables_url)
+										else: response = google_bq_sess.get(bq_tables_url, params={'pageToken': pageToken})
 									except TokenUpdated as e:
 										self.token_update(e.token, inputs.metadata['server_uri'], inputs.metadata['server_uri'][18:], inputs.metadata['session_key'], input_name, ew)
 										response = google_bq_sess.get(bq_tables_url)
@@ -220,42 +223,45 @@ class GABQInput(Script):
 										ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
 										break
 									dataDict = json.loads(response.text)
-								results = extractFields(schemaDict['schema'], dataDict)
+									if 'pageToken' not in dataDict.keys():
+										done = True
+									else: pageToken = dataDict['pageToken']
 
-								sessions = []
-								visitors = []
-								hits = []
-								for r in results:
-									sessions.append(buildStruct(r, ['fullVisitorId', 'visitId', 'visitStartTime', 'trafficSource']))
-									visitors.append(buildStruct(r, ['fullVisitorId', 'device']))
-									hit_ret = buildStruct(r, ['visitId', 'date', 'hits'])
-									for hit in hit_ret['hits']:
-										hit['visitId'] = hit_ret['visitId']
-										hit['date'] = hit_ret['date']
-										hits.append(hit)
+									results = extractFields(schemaDict['schema'], dataDict)
+									sessions = []
+									visitors = []
+									hits = []
+									for r in results:
+										sessions.append(buildStruct(r, ['fullVisitorId', 'visitId', 'visitStartTime', 'trafficSource', 'geoNetwork']))
+										visitors.append(buildStruct(r, ['fullVisitorId', 'device']))
+										hit_ret = buildStruct(r, ['visitId', 'date', 'hits'])
+										for hit in hit_ret['hits']:
+											hit['visitId'] = hit_ret['visitId']
+											hit['date'] = hit_ret['date']
+											hits.append(hit)
 
-								# Harvest sessions
-								ew.log(EventWriter.INFO, "Ingesting %s ga_sessions records" % len(sessions) )
-								for session in sessions:
-									ew.write_event(Event(data=json.dumps(session),
-														sourcetype='ga_sessions',
-														stanza=input_name,
-														time=float(session['visitStartTime'])))
+									# Harvest sessions
+									ew.log(EventWriter.INFO, "Ingesting %s ga_sessions records" % len(sessions) )
+									for session in sessions:
+										ew.write_event(Event(data=json.dumps(session),
+															sourcetype='ga_sessions',
+															stanza=input_name,
+															time=float(session['visitStartTime'])))
 
-								# Harvest visitors
-								ew.log(EventWriter.INFO, "Ingesting %s ga_visitor records" % len(visitors) )
-								for visitor in visitors:
-									ew.write_event(Event(data=json.dumps(visitor),
-														sourcetype='ga_visitors',
-														stanza=input_name))
+									# Harvest visitors
+									ew.log(EventWriter.INFO, "Ingesting %s ga_visitor records" % len(visitors) )
+									for visitor in visitors:
+										ew.write_event(Event(data=json.dumps(visitor),
+															sourcetype='ga_visitors',
+															stanza=input_name))
 
-								# Harvest hits
-								ew.log(EventWriter.INFO, "Ingesting %s ga_hits records" % len(hits) )
-								for hit in hits:
-									ew.write_event(Event(data=json.dumps(hit),
-														sourcetype='ga_hits',
-														stanza=input_name,
-														time=calendar.timegm(time.strptime(hit['date'] + hit['hour'] + hit['minute'], '%Y%m%d%H%M'))))
+									# Harvest hits
+									ew.log(EventWriter.INFO, "Ingesting %s ga_hits records" % len(hits) )
+									for hit in hits:
+										ew.write_event(Event(data=json.dumps(hit),
+															sourcetype='ga_hits',
+															stanza=input_name,
+															time=calendar.timegm(time.strptime(hit['date'] + hit['hour'] + hit['minute'], '%Y%m%d%H%M'))))
 								addCompletedTable(inputs.metadata['checkpoint_dir'], table['id'], input_name)
 					ew.log(EventWriter.INFO, "Saw %s tables and ingested %s on this pass, sleeping" % (gaTables, ingestCount))
 					
