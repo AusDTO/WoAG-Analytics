@@ -29,6 +29,7 @@ class GABQInput(Script):
 	_google_oauth2_token_url = "https://accounts.google.com/o/oauth2/token"
 	_google_bq_base_url = "https://www.googleapis.com/bigquery/v2"
 	_google_bq_ro_scope = [ "https://www.googleapis.com/auth/bigquery.readonly" ]
+	_tokenUpdated = False
 
 	def get_scheme(self):
 		scheme = Scheme("Google Analytics - BigQuery")
@@ -50,15 +51,6 @@ class GABQInput(Script):
 	def validate_input(self, inputs):
 		pass 
 
-	def token_update(self, token, srv_uri, srv_port, sess_tok, name, ew):
-		ew.log(EventWriter.INFO, "Updating the %s oauth2 token" % name)
-		try:
-			args = {'host':'localhost','port':srv_port,'token':sess_tok}
-			service = Service(**args)   
-			item = service.inputs.__getitem__(name[7:])
-			item.update(oauth2_access_token=token["access_token"],oauth2_refresh_token=token['refresh_token'])
-		except RuntimeError,e:
-			ew.log(EventWriter.ERROR, "Input: %s ; Error updating the oauth2 token: %s" % ( name, str(e) ))
 
 
 	def stream_events(self, inputs, ew):
@@ -138,137 +130,171 @@ class GABQInput(Script):
 						returnVal[field] = dataRow[field]
 			return returnVal
 
-		self._eventwriter = ew
-		token = {}
-		for input_name, input_item in inputs.inputs.iteritems():
-			token = { u'access_token': input_item["oauth2_access_token"], 
-						 u'token_type': 'Bearer', 
-						 u'expires_in': '1745', 
-						 u'refresh_token': input_item['oauth2_refresh_token'] }
-			token_refresh_params = {'client_id': input_item["oauth2_client_id"], 
-											'client_secret': input_item["oauth2_client_secret"]}
-			google_bq_sess = OAuth2Session(token_refresh_params['client_id'], scope=self._google_bq_ro_scope, 
-													 token=token, auto_refresh_kwargs=token_refresh_params, 
-													 auto_refresh_url=self._google_oauth2_token_url)
-			while True:
-				bq_base_url = self._google_bq_base_url + "/projects/" + urllib.quote(input_item['bigquery_project']) + "/datasets" 
-				try:
-					response = google_bq_sess.get(bq_base_url)
-				except TokenUpdated as e:
-					self.token_update(e.token, inputs.metadata['server_uri'], inputs.metadata['server_uri'][18:], inputs.metadata['session_key'], input_name, ew)
-					response = google_bq_sess.get(bq_base_url)
-				if response.status_code != 200:
-					ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
-					continue
-				if 'datasets' in json.loads(response.text).keys():
-					dsdata = json.loads(response.text)['datasets']
-				else:
-					ew.log(EventWriter.ERROR, "Error: No datasets in project %s " % input_item['bigquery_project'] )
-					continue
-				found_datasets = []
-				for ds in dsdata:
-					found_datasets.append(ds['datasetReference']['datasetId'])
-				if input_item['bigquery_dataset'] == '*':
-					datasets = found_datasets
-				else:
-					datasets = []
-					for s in input_item['bigquery_dataset'].split(','):
-						if s.strip() in found_datasets:
-							datasets.append(s.strip())
-				for dataset in datasets:
-					bq_ds_url = bq_base_url + "/" + urllib.quote(dataset) + "/tables"
-					try:
-						response = google_bq_sess.get(bq_ds_url)
-					except TokenUpdated as e:
-						self.token_update(e.token, inputs.metadata['server_uri'], inputs.metadata['server_uri'][18:], inputs.metadata['session_key'], input_name, ew)
-						response = google_bq_sess.get(bq_ds_url)
-					if response.status_code != 200:
-						ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
+		def fetchData(session, url, params = {}):
+			try:
+				response = session.get(url, params=params)
+			except TokenUpdated as e:
+				self._tokenUpdated = True
+				self._token = e.token
+				response = session.get(url, params=params)
+			if response.status_code != 200:
+				self._ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
+			return response
+
+		def pagingFetchData(session, url, pageToken, item):
+			done = False
+			nextPageToken = ''
+			result = []
+			while not done:
+				if nextPageToken == '': 
+					data = fetchData(session, url)
+				else: 
+					data = fetchData(session, url, params={'pageToken': nextPageToken})
+				if data.status_code != 200: return []
+				response = json.loads(data.text)
+				if pageToken in response.keys():
+					nextPageToken = response[pageToken]
+				else: done = True
+				if item in response.keys():
+					for i in response[item]:
+						result.append(i)
+				else: self._ew(EventWriter.ERROR, "Query error: did not return expected field %s" % item)
+			return result
+		
+		self._ew = ew
+		try:
+			for input_name, input_item in inputs.inputs.iteritems():
+				token = { u'access_token': input_item["oauth2_access_token"], 
+							 u'token_type': 'Bearer', 
+							 u'expires_in': '45', 
+							 u'refresh_token': input_item['oauth2_refresh_token'] }
+				token_refresh_params = {'client_id': input_item["oauth2_client_id"], 
+												'client_secret': input_item["oauth2_client_secret"]}
+				google_bq_sess = OAuth2Session(token_refresh_params['client_id'], scope=self._google_bq_ro_scope, 
+														 token=token, auto_refresh_kwargs=token_refresh_params, 
+														 auto_refresh_url=self._google_oauth2_token_url)
+				while True:
+					# List out the datasets in the project
+					bq_base_url = self._google_bq_base_url + "/projects/" + urllib.quote(input_item['bigquery_project']) + "/datasets" 
+					dsdata = pagingFetchData(google_bq_sess, bq_base_url, 'nextPageToken', 'datasets')
+					if len(dsdata) == 0: 
+						ew.log(EventWriter.ERROR, "Error: No datasets in project %s " % input_item['bigquery_project'] )
 						continue
-					tables = json.loads(response.text)['tables']
-					completedTables = getCompletedTables(inputs.metadata['checkpoint_dir'])
-					ingestCount = 0
-					gaTables = 0
-					for table in tables:
-						if input_name not in completedTables.keys(): completedTables[input_name] = []
-						if '.ga_sessions_' in table['id']:
-							gaTables += 1
-							if table['id'] not in completedTables[input_name] and 'intraday' not in table['id']:
-								ingestCount += 1
-								ew.log(EventWriter.INFO, "Table ingest: %s " % table['id'] )
-								
-								# We only want new tables. This is currently not intraday export compatible.
-								# Collect the schema and data
-								bq_tables_url = bq_ds_url + "/" + table['tableReference']['tableId']
-								try:
-									response = google_bq_sess.get(bq_tables_url)
-								except TokenUpdated as e:
-									self.token_update(e.token, inputs.metadata['server_uri'], inputs.metadata['server_uri'][18:], inputs.metadata['session_key'], input_name, ew)
-									response = google_bq_sess.get(bq_tables_url)
-								if response.status_code != 200:
-									ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
-									break
-								schemaDict = json.loads(response.text)
-								bq_tables_url = bq_ds_url + "/" + table['tableReference']['tableId'] + "/data"
-								done = False
-								pageToken = ''
-								while not done:
-									try:
-										if pageToken == '': response = google_bq_sess.get(bq_tables_url)
-										else: response = google_bq_sess.get(bq_tables_url, params={'pageToken': pageToken})
-									except TokenUpdated as e:
-										self.token_update(e.token, inputs.metadata['server_uri'], inputs.metadata['server_uri'][18:], inputs.metadata['session_key'], input_name, ew)
-										response = google_bq_sess.get(bq_tables_url)
-									if response.status_code != 200:
-										ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
-										break
-									dataDict = json.loads(response.text)
-									if 'pageToken' not in dataDict.keys():
-										done = True
-									else: pageToken = dataDict['pageToken']
-
-									results = extractFields(schemaDict['schema'], dataDict)
-									sessions = []
-									visitors = []
-									hits = []
-									for r in results:
-										sessions.append(buildStruct(r, ['fullVisitorId', 'visitId', 'visitStartTime', 'trafficSource', 'geoNetwork']))
-										visitors.append(buildStruct(r, ['fullVisitorId', 'device']))
-										hit_ret = buildStruct(r, ['visitId', 'date', 'hits'])
-										for hit in hit_ret['hits']:
-											hit['visitId'] = hit_ret['visitId']
-											hit['date'] = hit_ret['date']
-											hits.append(hit)
-
-									# Harvest sessions
-									ew.log(EventWriter.INFO, "Ingesting %s ga_sessions records" % len(sessions) )
-									for session in sessions:
-										ew.write_event(Event(data=json.dumps(session),
-															sourcetype='ga_sessions',
-															stanza=input_name,
-															time=float(session['visitStartTime'])))
-
-									# Harvest visitors
-									ew.log(EventWriter.INFO, "Ingesting %s ga_visitor records" % len(visitors) )
-									for visitor in visitors:
-										ew.write_event(Event(data=json.dumps(visitor),
-															sourcetype='ga_visitors',
-															stanza=input_name))
-
-									# Harvest hits
-									ew.log(EventWriter.INFO, "Ingesting %s ga_hits records" % len(hits) )
-									for hit in hits:
-										ew.write_event(Event(data=json.dumps(hit),
-															sourcetype='ga_hits',
-															stanza=input_name,
-															time=calendar.timegm(time.strptime(hit['date'] + hit['hour'] + hit['minute'], '%Y%m%d%H%M'))))
-								addCompletedTable(inputs.metadata['checkpoint_dir'], table['id'], input_name)
-					ew.log(EventWriter.INFO, "Saw %s tables and ingested %s on this pass, sleeping" % (gaTables, ingestCount))
+					# Match it up with the list provided in config
+					found_datasets = []
+					for ds in dsdata:
+						found_datasets.append(ds['datasetReference']['datasetId'])
+					if input_item['bigquery_dataset'] == '*':
+						datasets = found_datasets
+					else:
+						datasets = []
+						for s in input_item['bigquery_dataset'].split(','):
+							if s.strip() in found_datasets:
+								datasets.append(s.strip())
 					
-					# Sleep for 30 minutes; the token should be refreshed at that point, and this instance will likely be killed and restarted.
-					for i in range(29):
-						# This is a space for later - will use core reporting to pull out additional information
+					# Process each dataset
+					for dataset in datasets:
+						# Fetch a list of tables in the dataset
+						bq_ds_url = bq_base_url + "/" + urllib.quote(dataset) + "/tables"
+						tables = pagingFetchData(google_bq_sess, bq_ds_url, 'nextPageToken', 'tables')
+						if len(tables) == 0:
+							ew.log(EventWriter.INFO, "No tables in dataset: %s " % dataset )
+							continue
+						completedTables = getCompletedTables(inputs.metadata['checkpoint_dir'])
+						ingestCount = 0
+						gaTables = 0
+						for table in tables:
+							if input_name not in completedTables.keys(): completedTables[input_name] = []
+							if '.ga_sessions_' in table['id']:
+								gaTables += 1
+								# Pass over completed tables and intraday tables
+								if table['id'] not in completedTables[input_name] and 'intraday' not in table['id']:
+									ingestCount += 1
+									ew.log(EventWriter.INFO, "Table ingest: %s " % table['id'] )
+									
+									# We only want new tables. This is currently not intraday export compatible.
+									# Collect the schema 
+									bq_tables_url = bq_ds_url + "/" + table['tableReference']['tableId']
+									response = fetchData(google_bq_sess, bq_tables_url)
+									if response.status_code != 200:
+										break
+									schemaDict = json.loads(response.text)
+
+									# Collect and process the data
+									bq_tables_url = bq_ds_url + "/" + table['tableReference']['tableId'] + "/data"
+									done = False
+									pageToken = ''
+									while not done:
+										# Collect a page of data - around 20Mb chunk
+										if pageToken == '': 
+											response = fetchData(google_bq_sess, bq_tables_url)
+										else: 
+											response = google_bq_sess.get(bq_tables_url, params={'pageToken': pageToken})
+										if response.status_code != 200:
+											ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
+											break
+										dataDict = json.loads(response.text)
+										if 'pageToken' not in dataDict.keys():
+											done = True
+										else: 
+											pageToken = dataDict['pageToken']
+
+										# Join the data chunk with the table schema
+										results = extractFields(schemaDict['schema'], dataDict)
+										sessions = []
+										hits = []
+										
+										# Process each row into its base session and hit elements
+										for r in results:
+											hit_ret = buildStruct(r, ['visitId', 'date', 'hits'])
+											for hit in hit_ret['hits']:
+												hit['visitId'] = hit_ret['visitId']
+												hit['date'] = hit_ret['date']
+												hits.append(hit)
+											session_ret = buildStruct(r, ['fullVisitorId', 'visitId', 'visitStartTime', 'trafficSource', 'geoNetwork', 'device'])
+											session_ret['page_hostname'] = hit_ret['hits'][0]['page']['hostname']
+											sessions.append(session_ret)
+
+										# Harvest sessions
+										ew.log(EventWriter.INFO, "Ingesting %s ga_sessions records" % len(sessions) )
+										for session in sessions:
+											ew.write_event(Event(data=json.dumps(session),
+																sourcetype='ga_sessions',
+																stanza=input_name,
+																time=float(session['visitStartTime'])))
+
+										# Harvest hits
+										ew.log(EventWriter.INFO, "Ingesting %s ga_hits records" % len(hits) )
+										for hit in hits:
+											ew.write_event(Event(data=json.dumps(hit),
+																sourcetype='ga_hits',
+																stanza=input_name,
+																time=calendar.timegm(time.strptime(hit['date'] + hit['hour'] + hit['minute'], '%Y%m%d%H%M'))))
+
+									# Checkpoint the table so we don't process it again
+									addCompletedTable(inputs.metadata['checkpoint_dir'], table['id'], input_name)
+						ew.log(EventWriter.INFO, "Saw %s tables and ingested %s on this pass, sleeping" % (gaTables, ingestCount))
+
+						# If the token was updated during the import process save it back to the input config.
+						if self._tokenUpdated:
+							ew.log(EventWriter.INFO, "Updating the %s oauth2 token" % input_name)
+							try:
+								args = {'host':'localhost','port':inputs.metadata['server_uri'][18:],'token':inputs.metadata['session_key']}
+								service = Service(**args)   
+								item = service.inputs.__getitem__(input_name[7:])
+								item.update(oauth2_access_token=self._token["access_token"],oauth2_refresh_token=self._token['refresh_token'])
+								self._tokenUpdated = False
+							except RuntimeError,e:
+								ew.log(EventWriter.ERROR, "Input: %s ; Error updating the oauth2 token: %s" % ( input_name, str(e) ))
+
+						# Sleep for 30 minutes; the token should be refreshed at that point, and this instance will likely be killed and restarted.
+						#for i in range(29):
+							# This is a space for later - will use core reporting to pull out additional information
+							#time.sleep(60)
 						time.sleep(60)
+		except Exception, e:
+			ew.log(EventWriter.ERROR, "Unhandled exception: %s" % type(e) )
+			
 
 if __name__ == "__main__":
 	sys.exit(GABQInput().run(sys.argv))

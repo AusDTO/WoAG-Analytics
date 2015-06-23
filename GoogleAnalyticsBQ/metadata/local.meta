@@ -5,10 +5,3 @@ modtime = 1431393880.190779000
 [app/launcher]
 version = 6.2.2
 modtime = 1431393880.192640000
-
-[savedsearches/top%20search%20terms]
-access = read : [ * ]
-export = none
-owner = admin
-version = 6.2.2
-modtime = 1432013847.223636000
