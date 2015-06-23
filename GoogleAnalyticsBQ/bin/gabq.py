@@ -166,7 +166,7 @@ class GABQInput(Script):
 			for input_name, input_item in inputs.inputs.iteritems():
 				token = { u'access_token': input_item["oauth2_access_token"], 
 							 u'token_type': 'Bearer', 
-							 u'expires_in': '45', 
+							 u'expires_in': '1745', 
 							 u'refresh_token': input_item['oauth2_refresh_token'] }
 				token_refresh_params = {'client_id': input_item["oauth2_client_id"], 
 												'client_secret': input_item["oauth2_client_secret"]}
@@ -229,7 +229,7 @@ class GABQInput(Script):
 										if pageToken == '': 
 											response = fetchData(google_bq_sess, bq_tables_url)
 										else: 
-											response = google_bq_sess.get(bq_tables_url, params={'pageToken': pageToken})
+											response = fetchData(google_bq_sess, bq_tables_url, params={'pageToken': pageToken})
 										if response.status_code != 200:
 											ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
 											break
@@ -288,10 +288,9 @@ class GABQInput(Script):
 								ew.log(EventWriter.ERROR, "Input: %s ; Error updating the oauth2 token: %s" % ( input_name, str(e) ))
 
 						# Sleep for 30 minutes; the token should be refreshed at that point, and this instance will likely be killed and restarted.
-						#for i in range(29):
+						for i in range(29):
 							# This is a space for later - will use core reporting to pull out additional information
-							#time.sleep(60)
-						time.sleep(60)
+							time.sleep(60)
 		except Exception, e:
 			ew.log(EventWriter.ERROR, "Unhandled exception: %s" % type(e) )
 			
