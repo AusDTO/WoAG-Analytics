@@ -239,8 +239,9 @@ class GABQInput(Script):
 										
 										# Process each row into its base session and hit elements
 										for r in results:
-											hit_ret = buildStruct(r, ['visitId', 'date', 'hits'])
+											hit_ret = buildStruct(r, ['visitId', 'fullVisitorId', 'date', 'hits'])
 											for hit in hit_ret['hits']:
+												hit['fullVisitorId'] = hit_ret['fullVisitorId']
 												hit['visitId'] = hit_ret['visitId']
 												hit['date'] = hit_ret['date']
 												hits.append(hit)
