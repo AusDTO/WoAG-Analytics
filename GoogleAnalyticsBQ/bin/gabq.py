@@ -184,19 +184,22 @@ class GABQInput(Script):
 						if len(tables) == 0:
 							ew.log(EventWriter.INFO, "No tables in dataset: %s " % dataset )
 							continue
-						completedTables = []
 						query_mode = {'exec_mode': 'blocking'}
-						splunk_jobs = service.jobs
-						splunk_job = splunk_jobs.create("| metadata type=sources host=%s index=* | where totalCount>0" % dataset, **query_mode)
-						for result in ResultsReader(splunk_job.results()):
-							completedTables.append(result['source'])
 						ingestCount = 0
 						gaTables = 0
 						for table in tables:
 							if '.ga_sessions_' in table['id']:
 								gaTables += 1
-								# Pass over completed tables and intraday tables
+								# Pass over intraday tables 
 								if table['id'] not in completedTables and 'intraday' not in table['id']:
+									splunk_jobs = service.jobs
+									splunk_job = splunk_jobs.create('| metadata type=sources index=* | where totalCount>0 AND source="%s"' % table, **query_mode)
+									completedTables = []
+									for result in ResultsReader(splunk_job.results()):
+										completedTables.append(result['source'])
+									# Pass over completed tables
+									if len(completedTables) != 0:
+										continue
 									session_count = 0
 									hit_count = 0
 									chunk_count = 0
