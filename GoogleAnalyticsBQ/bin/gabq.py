@@ -52,8 +52,6 @@ class GABQInput(Script):
 	def validate_input(self, inputs):
 		pass 
 
-
-
 	def stream_events(self, inputs, ew):
 		def extractFields(schemaDict, dataDict):
 			def unpackSchema(schemaDict):
@@ -191,9 +189,9 @@ class GABQInput(Script):
 							if '.ga_sessions_' in table['id']:
 								gaTables += 1
 								# Pass over intraday tables 
-								if table['id'] not in completedTables and 'intraday' not in table['id']:
+								if 'intraday' not in table['id']:
 									splunk_jobs = service.jobs
-									splunk_job = splunk_jobs.create('| metadata type=sources index=* | where totalCount>0 AND source="%s"' % table, **query_mode)
+									splunk_job = splunk_jobs.create('| metadata type=sources index=* | where totalCount>0 AND source="%s"' % table['id'], **query_mode)
 									completedTables = []
 									for result in ResultsReader(splunk_job.results()):
 										completedTables.append(result['source'])
