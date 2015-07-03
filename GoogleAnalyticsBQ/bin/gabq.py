@@ -16,7 +16,6 @@ for filename in os.listdir(EGG_DIR):
 
 
 import requests, json, time, calendar, urllib
-#import sqlite
 from requests_oauthlib import OAuth2Session, TokenUpdated
 from oauthlib.oauth2 import WebApplicationClient 
 from splunklib.client import connect
@@ -51,6 +50,8 @@ class GABQInput(Script):
 
 	def validate_input(self, inputs):
 		pass 
+
+
 
 	def stream_events(self, inputs, ew):
 		def extractFields(schemaDict, dataDict):
@@ -111,6 +112,8 @@ class GABQInput(Script):
 				self._tokenUpdated = True
 				self._token = e.token
 				response = session.get(url, params=params)
+			except Exception, e:
+				ew.log(EventWriter.ERROR, "Unhandled exception: %s, fetching %s" % (type(e), url) )
 			if response.status_code != 200:
 				self._backing_off = True
 				self._ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
@@ -177,6 +180,7 @@ class GABQInput(Script):
 					# Process each dataset
 					for dataset in datasets:
 						# Fetch a list of tables in the dataset
+						ew.log(EventWriter.ERROR, "Processing dataset %s" % dataset )
 						bq_ds_url = bq_base_url + "/" + urllib.quote(dataset) + "/tables"
 						tables = pagingFetchData(google_bq_sess, bq_ds_url, 'nextPageToken', 'tables')
 						if len(tables) == 0:
@@ -274,22 +278,22 @@ class GABQInput(Script):
 									# Write out ingest stats
 									ew.log(EventWriter.INFO, "Finished table ingest=%s chunkcount=%s hitcount=%s sessioncount=%s" % (table['id'], chunk_count, hit_count, session_count))
 						
-						ew.log(EventWriter.INFO, "Finished ingest pass, tablecount=%s ingestcount=%s" % (gaTables, ingestCount))
+					ew.log(EventWriter.INFO, "Finished ingest pass, tablecount=%s ingestcount=%s" % (gaTables, ingestCount))
 
-						# If the token was updated during the import process save it back to the input config.
-						if self._tokenUpdated:
-							ew.log(EventWriter.INFO, "Updating the %s oauth2 token" % input_name)
-							try:
-								item = service.inputs.__getitem__(input_name[7:])
-								item.update(oauth2_access_token=self._token["access_token"],oauth2_refresh_token=self._token['refresh_token'])
-								self._tokenUpdated = False
-							except RuntimeError,e:
-								ew.log(EventWriter.ERROR, "Input: %s ; Error updating the oauth2 token: %s" % ( input_name, str(e) ))
+					# If the token was updated during the import process save it back to the input config.
+					if self._tokenUpdated:
+						ew.log(EventWriter.INFO, "Updating the %s oauth2 token" % input_name)
+						try:
+							item = service.inputs.__getitem__(input_name[7:])
+							item.update(oauth2_access_token=self._token["access_token"],oauth2_refresh_token=self._token['refresh_token'])
+							self._tokenUpdated = False
+						except RuntimeError,e:
+							ew.log(EventWriter.ERROR, "Input: %s ; Error updating the oauth2 token: %s" % ( input_name, str(e) ))
 
 						# Sleep for 30 minutes; the token should be refreshed at that point, and this instance will likely be killed and restarted.
-						for i in range(29):
-							# This is a space for later - will use core reporting to pull out additional information
-							time.sleep(60)
+					for i in range(29):
+						# This is a space for later - will use core reporting to pull out additional information
+						time.sleep(60)
 		except Exception, e:
 			ew.log(EventWriter.ERROR, "Unhandled exception: %s" % type(e) )
 			
