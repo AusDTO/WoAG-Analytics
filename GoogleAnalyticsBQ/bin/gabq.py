@@ -113,7 +113,10 @@ class GABQInput(Script):
 				self._token = e.token
 				response = session.get(url, params=params)
 			except Exception, e:
+				exc_type, exc_value, exc_traceback = sys.exc_info()
 				ew.log(EventWriter.ERROR, "Unhandled exception: %s, fetching %s" % (type(e), url) )
+				for msg in traceback.format_exception(exc_type, exc_value, exc_traceback):
+					ew.log(EventWriter.ERROR, msg )
 			if response.status_code != 200:
 				self._backing_off = True
 				self._ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
@@ -137,7 +140,7 @@ class GABQInput(Script):
 				if item in response.keys():
 					for i in response[item]:
 						result.append(i)
-				else: self._ew(EventWriter.ERROR, "Query error: did not return expected field %s" % item)
+				else: self._ew.log(EventWriter.ERROR, "Query error: %s did not return expected field %s, saw %s" % (url, item, str(response.keys())) )
 			return result
 		
 		self._ew = ew
