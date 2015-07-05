@@ -178,6 +178,9 @@ class GABQInput(Script):
 								datasets.append(s.strip())
 					
 					# Process each dataset
+					gaTables = 0
+					ingestCount = 0
+					query_mode = {'exec_mode': 'blocking'}
 					for dataset in datasets:
 						# Fetch a list of tables in the dataset
 						ew.log(EventWriter.ERROR, "Processing dataset %s" % dataset )
@@ -186,9 +189,6 @@ class GABQInput(Script):
 						if len(tables) == 0:
 							ew.log(EventWriter.INFO, "No tables in dataset: %s " % dataset )
 							continue
-						query_mode = {'exec_mode': 'blocking'}
-						ingestCount = 0
-						gaTables = 0
 						for table in tables:
 							if '.ga_sessions_' in table['id']:
 								gaTables += 1
