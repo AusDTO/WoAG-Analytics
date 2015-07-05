@@ -3,7 +3,7 @@
 GA-BQ Input Script
 '''
 
-import sys,os,time
+import sys,os,time, traceback
 
 SPLUNK_HOME='/opt/splunk'
 #dynamically load in any eggs in /etc/apps/GoogleAnalyticsBQ/bin
@@ -157,7 +157,7 @@ class GABQInput(Script):
 														 auto_refresh_url=self._google_oauth2_token_url)
 				while True:
 					if self._backing_off: 
-						time.sleep(input_item['backoff_time'])
+						time.sleep(float(input_item['backoff_time']))
 						self._backing_off = False
 					# List out the datasets in the project
 					bq_base_url = self._google_bq_base_url + "/projects/" + urllib.quote(input_item['bigquery_project']) + "/datasets" 
@@ -295,8 +295,10 @@ class GABQInput(Script):
 						# This is a space for later - will use core reporting to pull out additional information
 						time.sleep(60)
 		except Exception, e:
-			ew.log(EventWriter.ERROR, "Unhandled exception: %s" % type(e) )
-			
+			exc_type, exc_value, exc_traceback = sys.exc_info()
+			for msg in traceback.format_exception(exc_type, exc_value, exc_traceback):
+				ew.log(EventWriter.ERROR, msg )
+			ew.log(EventWriter.ERROR, "Quitting")
 
 if __name__ == "__main__":
 	sys.exit(GABQInput().run(sys.argv))
