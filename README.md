@@ -48,3 +48,5 @@ hitcount and sessioncount are how many hits and sessions were in that day's logs
 An input created with dataset=* will consume any gap dataset it finds without discrimination, and will continue until there are none left.
 
 If, for some reason, you need to reload a day's logs, you need to know the table name, dataset name (same as the viewID) and project name. Once you do, run "index=<whatever> source=projectname:datasetname.tablename | delete". On the next pass the input will collect the data again.
+
+If the input says it can't see any datasets, make sure the account you grabbed tokens from can actually use that project bu going into the BQ console and checking. If, for example, the account previously had access but currently does not, I found that BQ returned 200 OK for the request for datasets against the project but did not show any datasets. 
