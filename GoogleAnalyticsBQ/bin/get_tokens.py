@@ -3,14 +3,11 @@
 import os
 import sys
 
-EGG_DIR = "./"
+EGG_DIR = "/home/mark/"
 
 for filename in os.listdir(EGG_DIR):
-	if filename.endswith(".egg"):
-		print filename
-		sys.path.append(EGG_DIR + filename) 
-
-from requests_oauthlib import OAuth2Session
+    if filename.endswith(".egg"):
+        sys.path.append(EGG_DIR + filename) 
 
 # Credentials you get from registering a new application
 #client_id = '<the id you get from google>.apps.googleusercontent.com'
@@ -22,8 +19,9 @@ redirect_uri = 'urn:ietf:wg:oauth:2.0:oob'
 # OAuth endpoints given in the Google API documentation
 authorization_base_url = "https://accounts.google.com/o/oauth2/auth"
 token_url = "https://accounts.google.com/o/oauth2/token"
-scope = [ "https://www.googleapis.com/auth/bigquery.readonly" , "https://www.googleapis.com/auth/analytics.readonly" ]
+scope = [ "https://www.googleapis.com/auth/bigquery.readonly", "https://www.googleapis.com/auth/analytics.readonly" ]
 
+from requests_oauthlib import OAuth2Session
 google = OAuth2Session(client_id, scope=scope, redirect_uri=redirect_uri)
 
 # Redirect user to Google for authorization
@@ -33,7 +31,7 @@ authorization_url, state = google.authorization_url(authorization_base_url, acce
 print 'Please go here and authorize: ', authorization_url
 
 # Get the authorization verifier code from the callback url
-redirect_response = raw_input('Paste the full authorization code here: ')
+redirect_response = raw_input('Paste the full authorization code here:')
 
 # Fetch the access token
 t = google.fetch_token(token_url, client_secret=client_secret, code=redirect_response)

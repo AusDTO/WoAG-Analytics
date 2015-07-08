@@ -265,15 +265,18 @@ class GABQInput(Script):
 										
 										# Process each row into its base session and hit elements
 										for r in results:
+											session_ret = buildStruct(r, ['fullVisitorId', 'visitId', 'visitStartTime', 'trafficSource', 'geoNetwork', 'device'])
 											hit_ret = buildStruct(r, ['visitId', 'fullVisitorId', 'date', 'hits'])
+											session_ret['hitCount'] = len(hit_ret['hits'])
+											session_ret['humanTime'] = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(float(session_ret['visitStartTime'])))
 											for hit in hit_ret['hits']:
 												hit['fullVisitorId'] = hit_ret['fullVisitorId']
 												hit['visitId'] = hit_ret['visitId']
 												hit['date'] = hit_ret['date']
+												hit['hitTime'] = float(session_ret['visitStartTime']) + (float(hit['time'])/1000)
+												hit['humanTime'] = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(hit['hitTime']))
 												hits.append(hit)
-											session_ret = buildStruct(r, ['fullVisitorId', 'visitId', 'visitStartTime', 'trafficSource', 'geoNetwork', 'device'])
 											session_ret['page_hostname'] = hit_ret['hits'][0]['page']['hostname']
-											session_ret['hitCount'] = len(hit_ret['hits'])
 											sessions.append(session_ret)
 
 										# Harvest sessions
@@ -284,7 +287,7 @@ class GABQInput(Script):
 																source=table['id'],
 																host=dataset,
 																stanza=input_name,
-																time=float(calendar.timegm(time.localtime(float(session['visitStartTime']))))))
+																time=float(session['visitStartTime'])))
 
 										# Harvest hits
 										hit_count += len(hits)
@@ -294,7 +297,7 @@ class GABQInput(Script):
 																source=table['id'],
 																host=dataset,
 																stanza=input_name,
-																time=calendar.timegm(time.strptime(hit['date'] + hit['hour'] + hit['minute'], '%Y%m%d%H%M'))))
+																time=hit['hitTime']))
 
 									# Write out ingest stats
 									ew.log(EventWriter.INFO, "Finished table ingest=%s chunkcount=%s hitcount=%s sessioncount=%s" % (table['id'], chunk_count, hit_count, session_count))
