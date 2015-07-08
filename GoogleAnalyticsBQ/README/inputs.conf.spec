@@ -4,6 +4,7 @@
 bigquery_project= <value>
 bigquery_query_project= <value>
 bigquery_dataset= <value>
+default_timezone= <value>
 
 *oauth2 params
 oauth2_access_token= <value>

@@ -28,6 +28,7 @@ class GABQInput(Script):
 	_google_oauth2_authorization_url = "https://accounts.google.com/o/oauth2/auth"
 	_google_oauth2_token_url = "https://accounts.google.com/o/oauth2/token"
 	_google_bq_base_url = "https://www.googleapis.com/bigquery/v2"
+	_google_ga_base_url = "https://www.googleapis.com/analytics/v3/management/accounts"
 	_google_bq_ro_scope = [ "https://www.googleapis.com/auth/bigquery.readonly" ]
 	_tokenUpdated = False
 
@@ -39,6 +40,7 @@ class GABQInput(Script):
 		scheme.add_argument(Argument(name="bigquery_project", description="BigQuery Project - GA data in this context", required_on_create=True))
 		scheme.add_argument(Argument(name="bigquery_query_project", description="BigQuery Query Project - queries run in this context", required_on_create=True))
 		scheme.add_argument(Argument(name="bigquery_dataset", description="BigQuery Dataset(s); separate by comma for multiple sets, or * for all datasets in a project", required_on_create=True))
+		scheme.add_argument(Argument(name="default_timezone", description="Default timezone for data. Used when the account cannot see the View through the GA API. Format 'Australia/Sydney', 'GMT', etc (similar to user prefs in Splunk)", required_on_create=True))
 		scheme.add_argument(Argument(name="oauth2_access_token", description="OAuth2 Access Token", required_on_create=True))
 		scheme.add_argument(Argument(name="oauth2_refresh_token", description="OAuth2 Refresh Token", required_on_create=True))
 		scheme.add_argument(Argument(name="oauth2_client_id", description="OAuth2 Client ID", required_on_create=True))
@@ -140,7 +142,9 @@ class GABQInput(Script):
 				if item in response.keys():
 					for i in response[item]:
 						result.append(i)
-				else: self._ew.log(EventWriter.ERROR, "Query error: %s did not return expected field %s, saw %s" % (url, item, str(response.keys())) )
+				else: 
+					self._ew.log(EventWriter.ERROR, "Query error: %s did not return expected field %s, saw %s" % (url, item, str(response.keys())) )
+					self._backing_off = False
 			return result
 		
 		self._ew = ew
@@ -159,6 +163,14 @@ class GABQInput(Script):
 														 token=token, auto_refresh_kwargs=token_refresh_params, 
 														 auto_refresh_url=self._google_oauth2_token_url)
 				while True:
+					views = {}
+					acctdata = pagingFetchData(google_bq_sess, self._google_ga_base_url, 'nextPageToken', 'items')
+					for acct in acctdata:
+						propdata = pagingFetchData(google_bq_sess, acct['childLink']['href'], 'nextPageToken', 'items')
+						for prop in propdata:
+							viewdata = pagingFetchData(google_bq_sess, prop['childLink']['href'], 'nextPageToken', 'items')
+							for view in viewdata:
+								views[view['id']] = view
 					if self._backing_off: 
 						time.sleep(float(input_item['backoff_time']))
 						self._backing_off = False
@@ -185,6 +197,12 @@ class GABQInput(Script):
 					ingestCount = 0
 					query_mode = {'exec_mode': 'blocking'}
 					for dataset in datasets:
+						# Set processing timezone
+						try:
+							os.environ['TZ'] = views[dataset]['timezone']
+						except KeyError:
+							os.environ['TZ'] = input_item['default_timezone']
+						time.tzset()
 						# Fetch a list of tables in the dataset
 						ew.log(EventWriter.ERROR, "Processing dataset %s" % dataset )
 						bq_ds_url = bq_base_url + "/" + urllib.quote(dataset) + "/tables"
@@ -266,7 +284,7 @@ class GABQInput(Script):
 																source=table['id'],
 																host=dataset,
 																stanza=input_name,
-																time=float(session['visitStartTime'])))
+																time=float(calendar.timegm(time.localtime(float(session['visitStartTime']))))))
 
 										# Harvest hits
 										hit_count += len(hits)
