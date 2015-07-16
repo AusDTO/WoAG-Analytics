@@ -15,9 +15,9 @@ for filename in os.listdir(EGG_DIR):
         sys.path.append(EGG_DIR + filename) 
 
 
-import requests, json, time, calendar, urllib
+import requests, json, time, calendar, urllib, multiprocessing
 from requests_oauthlib import OAuth2Session, TokenUpdated
-from oauthlib.oauth2 import WebApplicationClient 
+from oauthlib.oauth2 import WebApplicationClient, TokenExpiredError
 from splunklib.client import connect
 from splunklib.client import Service
 from splunklib.results import *
@@ -29,7 +29,7 @@ class GABQInput(Script):
 	_google_oauth2_token_url = "https://accounts.google.com/o/oauth2/token"
 	_google_bq_base_url = "https://www.googleapis.com/bigquery/v2"
 	_google_ga_base_url = "https://www.googleapis.com/analytics/v3/management/accounts"
-	_google_bq_ro_scope = [ "https://www.googleapis.com/auth/bigquery.readonly" ]
+	_google_bq_ro_scope = [ "https://www.googleapis.com/auth/bigquery.readonly", "https://www.googleapis.com/auth/analytics.readonly" ]
 	_tokenUpdated = False
 
 	def get_scheme(self):
@@ -52,8 +52,6 @@ class GABQInput(Script):
 
 	def validate_input(self, inputs):
 		pass 
-
-
 
 	def stream_events(self, inputs, ew):
 		def extractFields(schemaDict, dataDict):
@@ -107,32 +105,39 @@ class GABQInput(Script):
 						returnVal[field] = dataRow[field]
 			return returnVal
 
-		def fetchData(session, url, params = {}):
+		def fetchData(ew, state, tokenLock, url, params = {}):
+			# build session
+			session = OAuth2Session(state['token_refresh']['client_id'], scope=self._google_bq_ro_scope, token=state['token'])
 			try:
 				response = session.get(url, params=params)
-			except TokenUpdated as e:
-				self._tokenUpdated = True
-				self._token = e.token
+				if response.status_code == 401:
+					# If we get a 401, then try and cycle our token and see if that sorts it out.
+					raise TokenExpiredError
+			except TokenExpiredError as e:
+				with tokenLock:
+					ew.log(EventWriter.ERROR, "Token has expired, refreshing")
+					state['token'] = session.refresh_token(self._google_oauth2_token_url, **state['token_refresh'])
 				response = session.get(url, params=params)
 			except Exception, e:
 				exc_type, exc_value, exc_traceback = sys.exc_info()
 				ew.log(EventWriter.ERROR, "Unhandled exception: %s, fetching %s" % (type(e), url) )
 				for msg in traceback.format_exception(exc_type, exc_value, exc_traceback):
-					ew.log(EventWriter.ERROR, msg )
+					ew.log(EventWriter.ERROR, msg)
 			if response.status_code != 200:
-				self._backing_off = True
-				self._ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
+				# Error message, die
+				ew.log(EventWriter.ERROR, "Query error: URL %s, params %s, response code %s, body %s" % ( url, params, response.status_code, response.text ) )
+				sys.exit(1)
 			return response
 
-		def pagingFetchData(session, url, pageToken, item):
+		def pagingFetchData(ew, state, tokenLock, url, pageToken, item):
 			done = False
 			nextPageToken = ''
 			result = []
 			while not done:
 				if nextPageToken == '': 
-					data = fetchData(session, url)
+					data = fetchData(ew, state, tokenLock, url)
 				else: 
-					data = fetchData(session, url, params={'pageToken': nextPageToken})
+					data = fetchData(ew, state, tokenLock, url, params={'pageToken': nextPageToken})
 				if data.status_code != 200: 
 					return []
 				response = json.loads(data.text)
@@ -143,40 +148,110 @@ class GABQInput(Script):
 					for i in response[item]:
 						result.append(i)
 				else: 
-					self._ew.log(EventWriter.ERROR, "Query error: %s did not return expected field %s, saw %s" % (url, item, str(response.keys())) )
-					self._backing_off = False
+					ew.log(EventWriter.ERROR, "Query error: %s did not return expected field %s, saw %s" % (url, item, str(response.keys())) )
 			return result
 		
-		self._ew = ew
-		self._backing_off = False
+		def downloader(state, tokenLock, ew, job):
+			sys.stdout = file("/tmp/%s" % job['table'], 'w')
+			print "test"
+			# job = { url dataset table startRow rowCount dsLength schema input }
+			ew.log(EventWriter.INFO, "Start chunk ingest=%s @ %s" % (job['table'], job['startRow']))
+			params = {'maxResults': job['rowCount'], 'startIndex': job['startRow']}
+			response = fetchData(ew, state, tokenLock, job['url'], params=params)
+			if response.status_code != 200:
+				ew.log(EventWriter.ERROR, "Query error: URL %s, startPoint %s, response code %s, body %s" % 
+													( job['url'], params, job['startRow'], response.status_code, response.text ) )
+			dataDict = json.loads(response.text)
+			# Join the data chunk with the table schema
+			results = extractFields(job['schema'], dataDict)
+			sessions = []
+			hits = []
+			
+			
+			ew.log(EventWriter.INFO, "ingest=%s rowcount=%s tableLength=%s" % (job['table'], len(results), job['dsLength']))
+			# Process each row into its base session and hit elements
+			for r in results:
+				session_ret = buildStruct(r, ['fullVisitorId', 'visitId', 'visitStartTime', 'trafficSource', 'geoNetwork', 'device'])
+				hit_ret = buildStruct(r, ['visitId', 'fullVisitorId', 'date', 'hits'])
+				session_ret['hitCount'] = len(hit_ret['hits'])
+				session_ret['humanTime'] = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(float(session_ret['visitStartTime'])))
+				for hit in hit_ret['hits']:
+					hit['fullVisitorId'] = hit_ret['fullVisitorId']
+					hit['visitId'] = hit_ret['visitId']
+					hit['date'] = hit_ret['date']
+					hit['hitTime'] = float(session_ret['visitStartTime']) + (float(hit['time'])/1000)
+					hit['humanTime'] = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(hit['hitTime']))
+					hits.append(hit)
+				session_ret['page_hostname'] = hit_ret['hits'][0]['page']['hostname']
+				sessions.append(session_ret)
+
+			# Harvest sessions
+			for session in sessions:
+				ew.write_event(Event(data=json.dumps(session),
+									sourcetype='ga_sessions',
+									source=job['table'],
+									host=job['dataset'],
+									stanza=job['input'],
+									time=float(session['visitStartTime'])))
+
+			# Harvest hits
+			for hit in hits:
+				ew.write_event(Event(data=json.dumps(hit),
+									sourcetype='ga_hits',
+									source=job['table'],
+									host=job['dataset'],
+									stanza=job['input'],
+									time=hit['hitTime']))
+
+			# update counters
+			state['chunks'] += 1
+			state['hits'] += len(hits)
+			state['sessions'] += len(sessions)
+			ew.log(EventWriter.INFO, "End chunk ingest=%s @ %s" % (job['table'], job['startRow']))
+
+		def downloadManager(downloadQueue, state, tokenLock, processingState, ew):
+			max_procs = 10
+			ew.log(EventWriter.INFO, "DM started")
+			# Keep spawning consumers until either the parent says there are no more job to be added to the queue 
+				# (by unsetting processingState) or the queue is empty.
+			while processingState or downloadQueue.qsize() > 0:
+				if len(multiprocessing.active_children()) < max_procs:
+					job = downloadQueue.get(True, 5)
+					x = multiprocessing.Process(target=downloader, args=(state, tokenLock, ew, job))
+					x.start()
+					ew.log(EventWriter.INFO, "DM spawned pid=%s" % x.pid)
+					downloadQueue.task_done()
+			ew.log(EventWriter.INFO, "DM finshed")
+
+		downloadQueue = multiprocessing.JoinableQueue()
+		dataManager = multiprocessing.Manager()
 		try:
+			processingState = dataManager.Event()
+			processingState = True
+			state = dataManager.dict()
+			tokenLock = multiprocessing.Lock()
 			args = {'host':'localhost','port':inputs.metadata['server_uri'][18:],'token':inputs.metadata['session_key']}
 			service = Service(**args)
 			for input_name, input_item in inputs.inputs.iteritems():
-				token = { u'access_token': input_item["oauth2_access_token"], 
-							 u'token_type': 'Bearer', 
-							 u'expires_in': '1745', 
-							 u'refresh_token': input_item['oauth2_refresh_token'] }
-				token_refresh_params = {'client_id': input_item["oauth2_client_id"], 
-												'client_secret': input_item["oauth2_client_secret"]}
-				google_bq_sess = OAuth2Session(token_refresh_params['client_id'], scope=self._google_bq_ro_scope, 
-														 token=token, auto_refresh_kwargs=token_refresh_params, 
-														 auto_refresh_url=self._google_oauth2_token_url)
+				state['token'] = { u'access_token': input_item["oauth2_access_token"], 
+										 u'token_type': 'Bearer', 
+										 u'expires_in': '60', 
+										 u'refresh_token': input_item['oauth2_refresh_token'] }
+				state['token_refresh'] = {'client_id': input_item["oauth2_client_id"], 
+												  'client_secret': input_item["oauth2_client_secret"]}
 				while True:
+					google_bq_sess = OAuth2Session(state['token_refresh']['client_id'], scope=self._google_bq_ro_scope, token=state['token'])
 					views = {}
-					acctdata = pagingFetchData(google_bq_sess, self._google_ga_base_url, 'nextPageToken', 'items')
+					acctdata = pagingFetchData(ew, state, tokenLock, self._google_ga_base_url, 'nextPageToken', 'items')
 					for acct in acctdata:
-						propdata = pagingFetchData(google_bq_sess, acct['childLink']['href'], 'nextPageToken', 'items')
+						propdata = pagingFetchData(ew, state, tokenLock, acct['childLink']['href'], 'nextPageToken', 'items')
 						for prop in propdata:
-							viewdata = pagingFetchData(google_bq_sess, prop['childLink']['href'], 'nextPageToken', 'items')
+							viewdata = pagingFetchData(ew, state, tokenLock, prop['childLink']['href'], 'nextPageToken', 'items')
 							for view in viewdata:
 								views[view['id']] = view
-					if self._backing_off: 
-						time.sleep(float(input_item['backoff_time']))
-						self._backing_off = False
 					# List out the datasets in the project
 					bq_base_url = self._google_bq_base_url + "/projects/" + urllib.quote(input_item['bigquery_project']) + "/datasets" 
-					dsdata = pagingFetchData(google_bq_sess, bq_base_url, 'nextPageToken', 'datasets')
+					dsdata = pagingFetchData(ew, state, tokenLock, bq_base_url, 'nextPageToken', 'datasets')
 					if len(dsdata) == 0: 
 						ew.log(EventWriter.ERROR, "Error: No datasets in project %s " % input_item['bigquery_project'] )
 						continue
@@ -195,7 +270,11 @@ class GABQInput(Script):
 					# Process each dataset
 					gaTables = 0
 					ingestCount = 0
+					state['hits'] = 0
+					state['sessions'] = 0
+					state['chunks'] = 0
 					query_mode = {'exec_mode': 'blocking'}
+					downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, tokenLock, processingState, ew))
 					for dataset in datasets:
 						# Set processing timezone
 						try:
@@ -206,7 +285,7 @@ class GABQInput(Script):
 						# Fetch a list of tables in the dataset
 						ew.log(EventWriter.ERROR, "Processing dataset %s" % dataset )
 						bq_ds_url = bq_base_url + "/" + urllib.quote(dataset) + "/tables"
-						tables = pagingFetchData(google_bq_sess, bq_ds_url, 'nextPageToken', 'tables')
+						tables = pagingFetchData(ew, state, tokenLock, bq_ds_url, 'nextPageToken', 'tables')
 						if len(tables) == 0:
 							ew.log(EventWriter.INFO, "No tables in dataset: %s " % dataset )
 							continue
@@ -223,101 +302,49 @@ class GABQInput(Script):
 									# Pass over completed tables
 									if len(completedTables) != 0:
 										continue
-									session_count = 0
-									hit_count = 0
-									chunk_count = 0
 									ingestCount += 1
-									ew.log(EventWriter.INFO, "Start table ingest=%s " % table['id'] )
 									
 									# We only want new tables. This is currently not intraday export compatible.
 									# Collect the schema 
 									bq_tables_url = bq_ds_url + "/" + table['tableReference']['tableId']
-									response = fetchData(google_bq_sess, bq_tables_url)
+									response = fetchData(ew, state, tokenLock, bq_tables_url)
 									if response.status_code != 200:
 										ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
+										ew.log(EventWriter.ERROR, "Query error: URL %s, params {}, response code %s, body %s" % ( bq_tables_url, response.status_code, response.text ) )
 										break
 									schemaDict = json.loads(response.text)
 
-									# Collect and process the data
 									bq_tables_url = bq_ds_url + "/" + table['tableReference']['tableId'] + "/data"
-									done = False
-									pageToken = ''
-									while not done:
-										# Collect a page of data - around 20Mb chunk
-										if pageToken == '': 
-											response = fetchData(google_bq_sess, bq_tables_url)
-										else: 
-											response = fetchData(google_bq_sess, bq_tables_url, params={'pageToken': pageToken})
-										if response.status_code != 200:
-											ew.log(EventWriter.ERROR, "Query error: Response code %s, body %s" % ( response.status_code, response.text ) )
-											break
-										chunk_count += 1
-										dataDict = json.loads(response.text)
-										if 'pageToken' not in dataDict.keys():
-											done = True
-										else: 
-											pageToken = dataDict['pageToken']
-
-										# Join the data chunk with the table schema
-										results = extractFields(schemaDict['schema'], dataDict)
-										sessions = []
-										hits = []
-										
-										# Process each row into its base session and hit elements
-										for r in results:
-											session_ret = buildStruct(r, ['fullVisitorId', 'visitId', 'visitStartTime', 'trafficSource', 'geoNetwork', 'device'])
-											hit_ret = buildStruct(r, ['visitId', 'fullVisitorId', 'date', 'hits'])
-											session_ret['hitCount'] = len(hit_ret['hits'])
-											session_ret['humanTime'] = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(float(session_ret['visitStartTime'])))
-											for hit in hit_ret['hits']:
-												hit['fullVisitorId'] = hit_ret['fullVisitorId']
-												hit['visitId'] = hit_ret['visitId']
-												hit['date'] = hit_ret['date']
-												hit['hitTime'] = float(session_ret['visitStartTime']) + (float(hit['time'])/1000)
-												hit['humanTime'] = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(hit['hitTime']))
-												hits.append(hit)
-											session_ret['page_hostname'] = hit_ret['hits'][0]['page']['hostname']
-											sessions.append(session_ret)
-
-										# Harvest sessions
-										session_count += len(sessions)
-										for session in sessions:
-											ew.write_event(Event(data=json.dumps(session),
-																sourcetype='ga_sessions',
-																source=table['id'],
-																host=dataset,
-																stanza=input_name,
-																time=float(session['visitStartTime'])))
-
-										# Harvest hits
-										hit_count += len(hits)
-										for hit in hits:
-											ew.write_event(Event(data=json.dumps(hit),
-																sourcetype='ga_hits',
-																source=table['id'],
-																host=dataset,
-																stanza=input_name,
-																time=hit['hitTime']))
-
-									# Write out ingest stats
-									ew.log(EventWriter.INFO, "Finished table ingest=%s chunkcount=%s hitcount=%s sessioncount=%s" % (table['id'], chunk_count, hit_count, session_count))
+									# Inject the dataset ID, page checkpoints and page counts into the download queue
+									# Rowcounter to be 1000
+									sr = 0
+									while sr < int(schemaDict['numRows']):
+										# job = { url dataset startRow rowCount dsLength schema input }
+										downloadQueue.put({'url': bq_tables_url, 'dataset': dataset, 'table': table['id'], 
+																 'startRow': sr, 'rowCount': 1000, 'dsLength': schemaDict['numRows'], 'schema': schemaDict['schema'],
+																 'input': input_name})
+										sr += 1000
+									if ingestCount == 1:
+										# if we have not already started the DM then start it now
+										job = downloadQueue.get(True)
+										downloader(state, tokenLock, ew, job)
+										downloadManagerProcess.start()
 						
-					ew.log(EventWriter.INFO, "Finished ingest pass, tablecount=%s ingestcount=%s" % (gaTables, ingestCount))
+					
+					# Tell the downloadManager there are no more jobs to be added.
+					processingState = False
 
-					# If the token was updated during the import process save it back to the input config.
-					if self._tokenUpdated:
-						ew.log(EventWriter.INFO, "Updating the %s oauth2 token" % input_name)
-						try:
-							item = service.inputs.__getitem__(input_name[7:])
-							item.update(oauth2_access_token=self._token["access_token"],oauth2_refresh_token=self._token['refresh_token'])
-							self._tokenUpdated = False
-						except RuntimeError,e:
-							ew.log(EventWriter.ERROR, "Input: %s ; Error updating the oauth2 token: %s" % ( input_name, str(e) ))
+					# Wait for the queue to be empty and join the downloadManager
+					downloadQueue.join()
+					if downloadManagerProcess.is_alive():
+						downloadManagerProcess.join()
+					ew.log(EventWriter.INFO, "Finished ingest pass, tablecount=%s ingestcount=%s chunks=%s" % (gaTables, ingestCount, state['chunks']))
 
-						# Sleep for 30 minutes; the token should be refreshed at that point, and this instance will likely be killed and restarted.
+					# Sleep for 30 minutes
 					for i in range(29):
 						# This is a space for later - will use core reporting to pull out additional information
 						time.sleep(60)
+
 		except Exception, e:
 			exc_type, exc_value, exc_traceback = sys.exc_info()
 			for msg in traceback.format_exception(exc_type, exc_value, exc_traceback):
