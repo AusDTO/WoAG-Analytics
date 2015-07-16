@@ -16,6 +16,7 @@ for filename in os.listdir(EGG_DIR):
 
 
 import requests, json, time, calendar, urllib, multiprocessing
+from Queue import Empty
 from requests_oauthlib import OAuth2Session, TokenUpdated
 from oauthlib.oauth2 import WebApplicationClient, TokenExpiredError
 from splunklib.client import connect
@@ -152,8 +153,6 @@ class GABQInput(Script):
 			return result
 		
 		def downloader(state, tokenLock, ew, job):
-			sys.stdout = file("/tmp/%s" % job['table'], 'w')
-			print "test"
 			# job = { url dataset table startRow rowCount dsLength schema input }
 			ew.log(EventWriter.INFO, "Start chunk ingest=%s @ %s" % (job['table'], job['startRow']))
 			params = {'maxResults': job['rowCount'], 'startIndex': job['startRow']}
@@ -214,20 +213,22 @@ class GABQInput(Script):
 			ew.log(EventWriter.INFO, "DM started")
 			# Keep spawning consumers until either the parent says there are no more job to be added to the queue 
 				# (by unsetting processingState) or the queue is empty.
-			while processingState or downloadQueue.qsize() > 0:
+			while (processingState.is_set()) or (not downloadQueue.empty()):
 				if len(multiprocessing.active_children()) < max_procs:
-					job = downloadQueue.get(True, 5)
-					x = multiprocessing.Process(target=downloader, args=(state, tokenLock, ew, job))
-					x.start()
-					ew.log(EventWriter.INFO, "DM spawned pid=%s" % x.pid)
-					downloadQueue.task_done()
+					try: 
+						job = downloadQueue.get(True, 5)
+						x = multiprocessing.Process(target=downloader, args=(state, tokenLock, ew, job))
+						x.start()
+						downloadQueue.task_done()
+					except Empty:
+						pass
 			ew.log(EventWriter.INFO, "DM finshed")
 
 		downloadQueue = multiprocessing.JoinableQueue()
 		dataManager = multiprocessing.Manager()
 		try:
 			processingState = dataManager.Event()
-			processingState = True
+			processingState.set()
 			state = dataManager.dict()
 			tokenLock = multiprocessing.Lock()
 			args = {'host':'localhost','port':inputs.metadata['server_uri'][18:],'token':inputs.metadata['session_key']}
@@ -329,10 +330,9 @@ class GABQInput(Script):
 										job = downloadQueue.get(True)
 										downloader(state, tokenLock, ew, job)
 										downloadManagerProcess.start()
-						
 					
 					# Tell the downloadManager there are no more jobs to be added.
-					processingState = False
+					processingState.clear()
 
 					# Wait for the queue to be empty and join the downloadManager
 					downloadQueue.join()
