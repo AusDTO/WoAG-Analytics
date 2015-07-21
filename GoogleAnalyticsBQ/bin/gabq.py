@@ -166,8 +166,13 @@ class GABQInput(Script):
 			sessions = []
 			hits = []
 			
+			# If the retreval was not a full set of records then push a new job back into the queue for the remaining records
+			if len(results) != int(job['rowCount']):
+				ew.log(EventWriter.INFO, "Reinsert chunk ingest=%s @ startpoint %s, rowcount %s, prevresults %s, dsLen %s" % (job['table'], job['startRow']+len(results), job['rowCount'] - len(results), len(results), job['dsLength']))
+				downloadQueue.put({'url': job['url'], 'dataset': job['dataset'], 'table': job['table'], 
+									'startRow': job['startRow'] + len(results), 'rowCount': job['rowCount'] - len(results), 
+									'dsLength': job['dsLength'], 'schema': job['schema'], 'input': job['input']})
 			
-			ew.log(EventWriter.INFO, "ingest=%s rowcount=%s tableLength=%s" % (job['table'], len(results), job['dsLength']))
 			# Process each row into its base session and hit elements
 			for r in results:
 				session_ret = buildStruct(r, ['fullVisitorId', 'visitId', 'visitStartTime', 'trafficSource', 'geoNetwork', 'device'])
@@ -206,7 +211,7 @@ class GABQInput(Script):
 			state['chunks'] += 1
 			state['hits'] += len(hits)
 			state['sessions'] += len(sessions)
-			ew.log(EventWriter.INFO, "End chunk ingest=%s @ %s" % (job['table'], job['startRow']))
+			ew.log(EventWriter.INFO, "End chunk ingest=%s @ %s, %s" % (job['table'], job['startRow'], len(sessions)))
 
 		def downloadManager(downloadQueue, state, tokenLock, processingState, ew):
 			max_procs = 10
@@ -321,9 +326,14 @@ class GABQInput(Script):
 									sr = 0
 									while sr < int(schemaDict['numRows']):
 										# job = { url dataset startRow rowCount dsLength schema input }
-										downloadQueue.put({'url': bq_tables_url, 'dataset': dataset, 'table': table['id'], 
-																 'startRow': sr, 'rowCount': 1000, 'dsLength': schemaDict['numRows'], 'schema': schemaDict['schema'],
-																 'input': input_name})
+										if (int(schemaDict['numRows']) - sr) < 1000:
+											downloadQueue.put({'url': bq_tables_url, 'dataset': dataset, 'table': table['id'], 
+																	 'startRow': sr, 'rowCount': int(schemaDict['numRows']) - sr, 'dsLength': schemaDict['numRows'], 'schema': schemaDict['schema'],
+																	 'input': input_name})
+										else:
+											downloadQueue.put({'url': bq_tables_url, 'dataset': dataset, 'table': table['id'], 
+																	 'startRow': sr, 'rowCount': 1000, 'dsLength': schemaDict['numRows'], 'schema': schemaDict['schema'],
+																	 'input': input_name})
 										sr += 1000
 									if ingestCount == 1:
 										# if we have not already started the DM then start it now
