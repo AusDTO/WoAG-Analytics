@@ -17,6 +17,7 @@ Setting up:
     * You need the project client ID and secret
     * Copy the URL into a browser, login as an account that can read the data from your BQ project, and approve the request
     * Paste the code back into the script.
+* Make sure the account can read the analytics data for that view
 * Set up a new GABQ input. Plug in all the relevant details. the access and refresh tokens come from the output of the get_tokens script.
 * You nearly definately want to push the data into a new index.
 * Start the input.
@@ -49,4 +50,4 @@ An input created with dataset=* will consume any gap dataset it finds without di
 
 If, for some reason, you need to reload a day's logs, you need to know the table name, dataset name (same as the viewID) and project name. Once you do, run "index=<whatever> source=projectname:datasetname.tablename | delete". On the next pass the input will collect the data again.
 
-If the input says it can't see any datasets, make sure the account you grabbed tokens from can actually use that project bu going into the BQ console and checking. If, for example, the account previously had access but currently does not, I found that BQ returned 200 OK for the request for datasets against the project but did not show any datasets. 
+If the input says it can't see any datasets, make sure the account you grabbed tokens from can actually use that project by going into the BQ console and checking. If, for example, the account previously had access but currently does not, I found that BQ returned 200 OK for the request for datasets against the project but did not show any datasets. 
