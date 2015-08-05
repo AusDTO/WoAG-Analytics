@@ -1,0 +1,61 @@
+[app/ui]
+version = 6.2.2
+modtime = 1434376826.142133000
+
+[app/launcher]
+version = 6.2.2
+modtime = 1434376826.143660000
+
+[commands/govauWhois]
+export = system
+owner = nobody
+version = 6.2.2
+modtime = 1434396294.371408000
+
+[views/website_overview]
+export = none
+owner = admin
+version = 6.2.2
+modtime = 1438596893.998823000
+
+[savedsearches/topRegion]
+export = none
+owner = admin
+version = 6.2.2
+modtime = 1438747810.709616000
+
+[savedsearches/topPagesBySite]
+export = none
+owner = admin
+version = 6.2.2
+modtime = 1438747815.874315000
+
+[savedsearches/avgWebsiteResponseTime]
+export = none
+owner = admin
+version = 6.2.2
+modtime = 1438747826.104623000
+
+[savedsearches/prevWeekSessionCount]
+export = none
+owner = admin
+version = 6.2.2
+modtime = 1438747831.247786000
+
+[savedsearches/topBrowser]
+export = none
+owner = admin
+version = 6.2.2
+modtime = 1438747835.886437000
+
+[savedsearches/topOS]
+export = none
+owner = admin
+version = 6.2.2
+modtime = 1438747913.785783000
+
+[savedsearches/topDeviceCategory]
+export = none
+owner = admin
+version = 6.2.2
+modtime = 1438747918.379304000

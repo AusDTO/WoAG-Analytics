@@ -1,0 +1,120 @@
+<form script="custom_layout_width.js">
+  <label>Registrant Overview</label>
+  <fieldset submitButton="false" autoRun="true">
+    <input type="multiselect" token="domain" searchWhenChanged="true">
+      <label>Website</label>
+      <choice value=".*">All Websites</choice>
+      <search>
+        <query>| inputlookup govauRegistrants.csv | regex registrant!="^\(" | sort domain | dedup domain</query>
+        <earliest>0</earliest>
+      </search>
+      <fieldForLabel>domain</fieldForLabel>
+      <fieldForValue>domain</fieldForValue>
+      <valuePrefix>match(page_hostname, "</valuePrefix>
+      <valueSuffix>$")</valueSuffix>
+      <delimiter> OR </delimiter>
+      <default>.*</default>
+    </input>
+    <input type="time" token="field1">
+      <label></label>
+      <default>
+        <earliest>0</earliest>
+        <latest></latest>
+      </default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Traffic Map</title>
+      <map>
+        <search>
+          <query></query>
+          <earliest>0</earliest>
+          <latest></latest>
+        </search>
+      </map>
+    </panel>
+    <panel>
+      <single>
+        <title>Bounce Rate</title>
+        <search>
+          <query>| pivot GA_Session_Information GovAuSessions count(GovAuSessions) AS "OneHit" SPLITROW page_hostname AS page_hostname FILTER hitCount = 1 ROWSUMMARY 0 COLSUMMARY 0 NUMCOLS 0 SHOWOTHER 1| join [ | pivot GA_Session_Information GovAuSessions count(GovAuSessions) AS "SessionCount" SPLITROW page_hostname AS page_hostname  ROWSUMMARY 0 COLSUMMARY 0 NUMCOLS 0 SHOWOTHER 1 ] | where $domain$ |  addcoltotals label=Total labelfield=page_hostname  | where page_hostname="Total" | eval br=OneHit/SessionCount*100 | fields br</query>
+          <earliest>$field1.earliest$</earliest>
+          <latest>$field1.latest$</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.axisY2.enabled">false</option>
+        <option name="charting.axisLabelsX.majorLabelStyle.overflowMode">ellipsisNone</option>
+        <option name="charting.axisLabelsX.majorLabelStyle.rotation">0</option>
+        <option name="charting.axisTitleX.visibility">visible</option>
+        <option name="charting.axisTitleY.visibility">visible</option>
+        <option name="charting.axisTitleY2.visibility">visible</option>
+        <option name="charting.axisX.scale">linear</option>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.axisY2.scale">inherit</option>
+        <option name="charting.chart.bubbleMaximumSize">50</option>
+        <option name="charting.chart.bubbleMinimumSize">10</option>
+        <option name="charting.chart.bubbleSizeBy">area</option>
+        <option name="charting.chart.nullValueMode">gaps</option>
+        <option name="charting.chart.sliceCollapsingThreshold">0.01</option>
+        <option name="charting.chart.stackMode">default</option>
+        <option name="charting.chart.style">shiny</option>
+        <option name="charting.drilldown">all</option>
+        <option name="charting.layout.splitSeries">0</option>
+        <option name="charting.legend.labelStyle.overflowMode">ellipsisMiddle</option>
+        <option name="charting.legend.placement">right</option>
+        <option name="drilldown">none</option>
+        <option name="linkView">search</option>
+      </single>
+      <single>
+        <title>Average Session Hits</title>
+        <search>
+          <query>| pivot GA_Session_Information GovAuSessions count(GovAuSessions) AS "count" sum(hitCount) AS "sum" SPLITROW page_hostname AS page_hostname ROWSUMMARY 0 COLSUMMARY 0 NUMCOLS 0 SHOWOTHER 1 |  where $domain$ | addcoltotals label=Total labelfield=page_hostname | eval avg=sum/count | where page_hostname="Total" | fields avg</query>
+          <earliest>$field1.earliest$</earliest>
+          <latest>$field1.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="linkView">search</option>
+      </single>
+      <single>
+        <title>Average Session Time</title>
+        <search>
+          <query></query>
+          <earliest>$field1.earliest$</earliest>
+          <latest>$field1.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="linkView">search</option>
+      </single>
+      <chart>
+        <title>Device types</title>
+        <search>
+          <query>| pivot GA_Session_Information GovAuSessions count(GovAuSessions) AS "Count of GovAuSessions" SPLITROW page_hostname AS page_hostname SPLITCOL device.deviceCategory SORT 10000 page_hostname ROWSUMMARY 0 COLSUMMARY 0 NUMCOLS 100 SHOWOTHER 1 | where $domain$ | addcoltotals label=Total labelfield=page_hostname | where page_hostname="Total" | transpose | where column!="page_hostname" | rename "row 1" AS Total, column as "Device Type"</query>
+          <earliest>$field1.earliest$</earliest>
+          <latest>$field1.latest$</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.axisY2.enabled">undefined</option>
+        <option name="charting.axisLabelsX.majorLabelStyle.overflowMode">ellipsisNone</option>
+        <option name="charting.axisLabelsX.majorLabelStyle.rotation">0</option>
+        <option name="charting.axisTitleX.visibility">visible</option>
+        <option name="charting.axisTitleY.visibility">visible</option>
+        <option name="charting.axisTitleY2.visibility">visible</option>
+        <option name="charting.axisX.scale">linear</option>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.axisY2.scale">inherit</option>
+        <option name="charting.chart.bubbleMaximumSize">50</option>
+        <option name="charting.chart.bubbleMinimumSize">10</option>
+        <option name="charting.chart.bubbleSizeBy">area</option>
+        <option name="charting.chart.nullValueMode">gaps</option>
+        <option name="charting.chart.sliceCollapsingThreshold">0.01</option>
+        <option name="charting.chart.stackMode">default</option>
+        <option name="charting.chart.style">shiny</option>
+        <option name="charting.drilldown">all</option>
+        <option name="charting.layout.splitSeries">0</option>
+        <option name="charting.legend.labelStyle.overflowMode">ellipsisMiddle</option>
+        <option name="charting.legend.placement">right</option>
+      </chart>
+    </panel>
+  </row>
+</form>
