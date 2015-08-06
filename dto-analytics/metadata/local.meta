@@ -59,3 +59,15 @@ export = none
 owner = admin
 version = 6.2.2
 modtime = 1438747918.379304000
+
+[datamodels/GA_Session_Information]
+export = system
+owner = admin
+version = 6.2.2
+modtime = 1438769909.316025000
+
+[models/GA_Session_Information]
+export = system
+owner = admin
+version = 6.2.2
+modtime = 1438769909.334348000
