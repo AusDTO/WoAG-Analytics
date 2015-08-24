@@ -235,7 +235,7 @@ class GABQInput(Script):
 								ew.log(EventWriter.INFO, "DM Status: %s jobs started. Children: %s" % (jobruncounter, children))
 					except Empty:
 						time.sleep(1)
-			ew.log(EventWriter.INFO, "DM finished")
+			ew.log(EventWriter.INFO, "DM finished, %s jobs total" % jobruncounter)
 			return
 
 		downloadQueue = multiprocessing.JoinableQueue()
@@ -290,7 +290,6 @@ class GABQInput(Script):
 					completedTables = []
 					for result in ResultsReader(splunk_job):
 						completedTables.append(result['source'])
-					ew.log(EventWriter.INFO, "Info: %s completedTables, first is: %s" % (len(completedTables), completedTables[0]))
 
 					# Process each dataset
 					gaTables = 0
