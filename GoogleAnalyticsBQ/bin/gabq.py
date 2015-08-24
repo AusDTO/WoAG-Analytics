@@ -272,15 +272,23 @@ class GABQInput(Script):
 						for s in input_item['bigquery_dataset'].split(','):
 							if s.strip() in found_datasets:
 								datasets.append(s.strip())
-					
+
+                    # Get the list of completed tables
+					query_mode = {'count': 0}
+                    # Table seen to be completed when it has results in it - not a 'hard' verification against source data.
+					splunk_job = service.jobs.oneshot('| metadata type=sources index=* | where totalCount>0', **query_mode)
+					completedTables = []
+					for result in ResultsReader(splunk_job):
+						completedTables.append(result['source'])
+					ew.log(EventWriter.INFO, "Info: %s completedTables, first is: %s" % (len(completedTables), completedTables[0]))
+
 					# Process each dataset
 					gaTables = 0
 					ingestCount = 0
 					state['hits'] = 0
 					state['sessions'] = 0
 					state['chunks'] = 0
-					query_mode = {'exec_mode': 'blocking'}
-					downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, tokenLock, processingState, ew))
+					downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, processingState, tokenLock, ew))
 					for dataset in datasets:
 						# Set processing timezone
 						try:
@@ -298,16 +306,8 @@ class GABQInput(Script):
 						for table in tables:
 							if '.ga_sessions_' in table['id']:
 								gaTables += 1
-								# Pass over intraday tables 
-								if 'intraday' not in table['id']:
-									splunk_jobs = service.jobs
-									splunk_job = splunk_jobs.create('| metadata type=sources index=* | where totalCount>0 AND source="%s"' % table['id'], **query_mode)
-									completedTables = []
-									for result in ResultsReader(splunk_job.results()):
-										completedTables.append(result['source'])
-									# Pass over completed tables
-									if len(completedTables) != 0:
-										continue
+								# Pass over completed and intraday tables
+								if ('intraday' not in table['id']) and (table['id'] not in completedTables):
 									ingestCount += 1
 									
 									# We only want new tables. This is currently not intraday export compatible.
