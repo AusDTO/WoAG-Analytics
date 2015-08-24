@@ -244,7 +244,7 @@ class GABQInput(Script):
 							children = []
 							for i in multiprocessing.active_children():
 								children.append(i.pid)
-								ew.log(EventWriter.INFO, "DM Status: %s jobs started. Children: %s" % (jobruncounter, children))
+							ew.log(EventWriter.INFO, "DM Status: %s jobs started. Children: %s" % (jobruncounter, children))
 					except Empty:
 						time.sleep(1)
 			ew.log(EventWriter.INFO, "DM finished, %s jobs total" % jobruncounter)
