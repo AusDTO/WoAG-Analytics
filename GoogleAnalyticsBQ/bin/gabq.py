@@ -12,7 +12,7 @@ EGG_DIR = APP_HOME + "bin/"
 
 for filename in os.listdir(EGG_DIR):
     if filename.endswith(".egg"):
-        sys.path.append(EGG_DIR + filename) 
+        sys.path.append(EGG_DIR + filename)
 
 
 import requests, json, time, calendar, urllib, multiprocessing
@@ -52,7 +52,7 @@ class GABQInput(Script):
 		return scheme
 
 	def validate_input(self, inputs):
-		pass 
+		pass
 
 	def stream_events(self, inputs, ew):
 		def extractFields(schemaDict, dataDict):
@@ -135,11 +135,11 @@ class GABQInput(Script):
 			nextPageToken = ''
 			result = []
 			while not done:
-				if nextPageToken == '': 
+				if nextPageToken == '':
 					data = fetchData(ew, state, tokenLock, url)
-				else: 
+				else:
 					data = fetchData(ew, state, tokenLock, url, params={'pageToken': nextPageToken})
-				if data.status_code != 200: 
+				if data.status_code != 200:
 					return []
 				response = json.loads(data.text)
 				if pageToken in response.keys():
@@ -148,10 +148,10 @@ class GABQInput(Script):
 				if item in response.keys():
 					for i in response[item]:
 						result.append(i)
-				else: 
+				else:
 					ew.log(EventWriter.ERROR, "Query error: %s did not return expected field %s, saw %s" % (url, item, str(response.keys())) )
 			return result
-		
+
 		def downloader(state, tokenLock, ew, job):
 			# job = { url dataset table startRow rowCount dsLength schema input }
 			ew.log(EventWriter.INFO, "Start chunk ingest=%s @ %s" % (job['table'], job['startRow']))
@@ -165,14 +165,14 @@ class GABQInput(Script):
 			results = extractFields(job['schema'], dataDict)
 			sessions = []
 			hits = []
-			
+
 			# If the retreval was not a full set of records then push a new job back into the queue for the remaining records
 			if len(results) != int(job['rowCount']):
 				ew.log(EventWriter.INFO, "Reinsert chunk ingest=%s @ startpoint %s, rowcount %s, prevresults %s, dsLen %s" % (job['table'], job['startRow']+len(results), job['rowCount'] - len(results), len(results), job['dsLength']))
 				downloadQueue.put({'url': job['url'], 'dataset': job['dataset'], 'table': job['table'], 
 									'startRow': job['startRow'] + len(results), 'rowCount': job['rowCount'] - len(results), 
 									'dsLength': job['dsLength'], 'schema': job['schema'], 'input': job['input']})
-			
+
 			# Process each row into its base session and hit elements
 			for r in results:
 				session_ret = buildStruct(r, ['fullVisitorId', 'visitId', 'visitStartTime', 'trafficSource', 'geoNetwork', 'device'])
@@ -220,7 +220,7 @@ class GABQInput(Script):
 				# (by unsetting processingState) or the queue is empty.
 			while (processingState.is_set()) or (not downloadQueue.empty()):
 				if len(multiprocessing.active_children()) < max_procs:
-					try: 
+					try:
 						job = downloadQueue.get(True, 5)
 						x = multiprocessing.Process(target=downloader, args=(state, tokenLock, ew, job))
 						x.start()
@@ -239,11 +239,11 @@ class GABQInput(Script):
 			args = {'host':'localhost','port':inputs.metadata['server_uri'][18:],'token':inputs.metadata['session_key']}
 			service = Service(**args)
 			for input_name, input_item in inputs.inputs.iteritems():
-				state['token'] = { u'access_token': input_item["oauth2_access_token"], 
-										 u'token_type': 'Bearer', 
-										 u'expires_in': '60', 
+				state['token'] = { u'access_token': input_item["oauth2_access_token"],
+										 u'token_type': 'Bearer',
+										 u'expires_in': '60',
 										 u'refresh_token': input_item['oauth2_refresh_token'] }
-				state['token_refresh'] = {'client_id': input_item["oauth2_client_id"], 
+				state['token_refresh'] = {'client_id': input_item["oauth2_client_id"],
 												  'client_secret': input_item["oauth2_client_secret"]}
 				while True:
 					google_bq_sess = OAuth2Session(state['token_refresh']['client_id'], scope=self._google_bq_ro_scope, token=state['token'])
@@ -256,9 +256,9 @@ class GABQInput(Script):
 							for view in viewdata:
 								views[view['id']] = view
 					# List out the datasets in the project
-					bq_base_url = self._google_bq_base_url + "/projects/" + urllib.quote(input_item['bigquery_project']) + "/datasets" 
+					bq_base_url = self._google_bq_base_url + "/projects/" + urllib.quote(input_item['bigquery_project']) + "/datasets"
 					dsdata = pagingFetchData(ew, state, tokenLock, bq_base_url, 'nextPageToken', 'datasets')
-					if len(dsdata) == 0: 
+					if len(dsdata) == 0:
 						ew.log(EventWriter.ERROR, "Error: No datasets in project %s " % input_item['bigquery_project'] )
 						continue
 					# Match it up with the list provided in config
@@ -272,15 +272,23 @@ class GABQInput(Script):
 						for s in input_item['bigquery_dataset'].split(','):
 							if s.strip() in found_datasets:
 								datasets.append(s.strip())
-					
+
+                    # Get the list of completed tables
+					query_mode = {'count': 0}
+                    # Table seen to be completed when it has results in it - not a 'hard' verification against source data.
+					splunk_job = service.jobs.oneshot('| metadata type=sources index=* | where totalCount>0', **query_mode)
+					completedTables = []
+					for result in ResultsReader(splunk_job):
+						completedTables.append(result['source'])
+					ew.log(EventWriter.INFO, "Info: %s completedTables, first is: %s" % (len(completedTables), completedTables[0]))
+
 					# Process each dataset
 					gaTables = 0
 					ingestCount = 0
 					state['hits'] = 0
 					state['sessions'] = 0
 					state['chunks'] = 0
-					query_mode = {'exec_mode': 'blocking'}
-					downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, tokenLock, processingState, ew))
+					downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, processingState, tokenLock, ew))
 					for dataset in datasets:
 						# Set processing timezone
 						try:
@@ -298,20 +306,12 @@ class GABQInput(Script):
 						for table in tables:
 							if '.ga_sessions_' in table['id']:
 								gaTables += 1
-								# Pass over intraday tables 
-								if 'intraday' not in table['id']:
-									splunk_jobs = service.jobs
-									splunk_job = splunk_jobs.create('| metadata type=sources index=* | where totalCount>0 AND source="%s"' % table['id'], **query_mode)
-									completedTables = []
-									for result in ResultsReader(splunk_job.results()):
-										completedTables.append(result['source'])
-									# Pass over completed tables
-									if len(completedTables) != 0:
-										continue
+								# Pass over completed and intraday tables
+								if ('intraday' not in table['id']) and (table['id'] not in completedTables):
 									ingestCount += 1
-									
+
 									# We only want new tables. This is currently not intraday export compatible.
-									# Collect the schema 
+									# Collect the schema
 									bq_tables_url = bq_ds_url + "/" + table['tableReference']['tableId']
 									response = fetchData(ew, state, tokenLock, bq_tables_url)
 									if response.status_code != 200:
@@ -327,11 +327,11 @@ class GABQInput(Script):
 									while sr < int(schemaDict['numRows']):
 										# job = { url dataset startRow rowCount dsLength schema input }
 										if (int(schemaDict['numRows']) - sr) < 1000:
-											downloadQueue.put({'url': bq_tables_url, 'dataset': dataset, 'table': table['id'], 
+											downloadQueue.put({'url': bq_tables_url, 'dataset': dataset, 'table': table['id'],
 																	 'startRow': sr, 'rowCount': int(schemaDict['numRows']) - sr, 'dsLength': schemaDict['numRows'], 'schema': schemaDict['schema'],
 																	 'input': input_name})
 										else:
-											downloadQueue.put({'url': bq_tables_url, 'dataset': dataset, 'table': table['id'], 
+											downloadQueue.put({'url': bq_tables_url, 'dataset': dataset, 'table': table['id'],
 																	 'startRow': sr, 'rowCount': 1000, 'dsLength': schemaDict['numRows'], 'schema': schemaDict['schema'],
 																	 'input': input_name})
 										sr += 1000
@@ -340,7 +340,7 @@ class GABQInput(Script):
 										job = downloadQueue.get(True)
 										downloader(state, tokenLock, ew, job)
 										downloadManagerProcess.start()
-					
+
 					# Tell the downloadManager there are no more jobs to be added.
 					processingState.clear()
 
