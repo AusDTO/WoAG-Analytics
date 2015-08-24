@@ -209,9 +209,6 @@ class GABQInput(Script):
 									time=hit['hitTime']))
 
 			# update counters
-			state['chunks'] += 1
-			state['hits'] += len(hits)
-			state['sessions'] += len(sessions)
 			ew.log(EventWriter.INFO, "P: %s End chunk ingest=%s @ %s, %s" % (pid, job['table'], job['startRow'], len(sessions)))
 
 		def downloadManager(downloadQueue, state, processingState, tokenLock, ew):
@@ -288,9 +285,6 @@ class GABQInput(Script):
 					# Process each dataset
 					gaTables = 0
 					ingestCount = 0
-					state['hits'] = 0
-					state['sessions'] = 0
-					state['chunks'] = 0
 					downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, processingState, tokenLock, ew))
 					for dataset in datasets:
 						# Set processing timezone
@@ -352,7 +346,7 @@ class GABQInput(Script):
 					downloadQueue.join()
 					if downloadManagerProcess.is_alive():
 						downloadManagerProcess.join()
-					ew.log(EventWriter.INFO, "Finished ingest pass, tablecount=%s ingestcount=%s chunks=%s" % (gaTables, ingestCount, state['chunks']))
+					ew.log(EventWriter.INFO, "Finished ingest pass, tablecount=%s ingestcount=%s" % (gaTables, ingestCount))
 					dataManager.shutdown()
 					time.sleep(1800)
 
