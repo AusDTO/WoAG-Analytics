@@ -213,26 +213,26 @@ class GABQInput(Script):
 
 		def downloadManager(downloadQueue, state, processingState, tokenLock, ew):
 			max_procs = 10
-            jobruncounter = 0
+			jobruncounter = 0
 			ew.log(EventWriter.INFO, "DM started %s" % os.getpid())
 			# Keep spawning consumers until either the parent says there are no more job to be added to the queue
 				# (by unsetting state['processing']) or the queue is empty and until there are no running children.
 			while (processingState.is_set()) or (not downloadQueue.empty()) or (len(multiprocessing.active_children()) > 0):
 				if len(multiprocessing.active_children()) < max_procs:
 					try:
-                        # This will wait at most 5 seconds for a job; otherwise raise Empty.
-                        # Need to do this to track completion notification from the main process.
+						# This will wait at most 5 seconds for a job; otherwise raise Empty.
+						# Need to do this to track completion notification from the main process.
 						job = downloadQueue.get(True, 5)
 						x = multiprocessing.Process(target=downloader, args=(state, tokenLock, ew, job))
 						x.start()
 						downloadQueue.task_done()
-                        jobruncounter += 1
-                        # Every hundred jobs report on the queue state and process numbers.
-                        if jobruncounter % 100 == 0:
-                            children = []
-                            for i in multiprocessing.active_children():
-                                children.append(i.pid)
-                			ew.log(EventWriter.INFO, "DM Status: %s jobs started. Children: %s" % (jobruncounter, children))
+						jobruncounter += 1
+						# Every hundred jobs report on the queue state and process numbers.
+						if jobruncounter % 100 == 0:
+							children = []
+							for i in multiprocessing.active_children():
+								children.append(i.pid)
+								ew.log(EventWriter.INFO, "DM Status: %s jobs started. Children: %s" % (jobruncounter, children))
 					except Empty:
 						time.sleep(1)
 			ew.log(EventWriter.INFO, "DM finished")
