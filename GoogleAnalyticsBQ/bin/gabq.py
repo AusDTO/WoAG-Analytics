@@ -250,9 +250,9 @@ class GABQInput(Script):
 			ew.log(EventWriter.INFO, "DM finished, %s jobs total" % jobruncounter)
 			return
 
-		downloadQueue = multiprocessing.JoinableQueue()
 		dataManager = multiprocessing.Manager()
 		try:
+			downloadQueue = dataManager.Queue()
 			processingState = dataManager.Event()
 			processingState.set()
 			state = dataManager.dict()
