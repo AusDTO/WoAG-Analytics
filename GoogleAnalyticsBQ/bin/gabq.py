@@ -154,12 +154,13 @@ class GABQInput(Script):
 
 		def downloader(state, tokenLock, ew, job):
 			# job = { url dataset table startRow rowCount dsLength schema input }
-			ew.log(EventWriter.INFO, "Start chunk ingest=%s @ %s" % (job['table'], job['startRow']))
+			pid = os.getpid()
+			ew.log(EventWriter.INFO, "P: %s Start chunk ingest=%s @ %s" % (pid, job['table'], job['startRow']))
 			params = {'maxResults': job['rowCount'], 'startIndex': job['startRow']}
 			response = fetchData(ew, state, tokenLock, job['url'], params=params)
 			if response.status_code != 200:
-				ew.log(EventWriter.ERROR, "Query error: URL %s, startPoint %s, response code %s, body %s" % 
-													( job['url'], params, job['startRow'], response.status_code, response.text ) )
+				ew.log(EventWriter.ERROR, "P: %s Query error: URL %s, startPoint %s, response code %s, body %s" %
+													( pid, job['url'], params, job['startRow'], response.status_code, response.text ) )
 			dataDict = json.loads(response.text)
 			# Join the data chunk with the table schema
 			results = extractFields(job['schema'], dataDict)
@@ -168,9 +169,9 @@ class GABQInput(Script):
 
 			# If the retreval was not a full set of records then push a new job back into the queue for the remaining records
 			if len(results) != int(job['rowCount']):
-				ew.log(EventWriter.INFO, "Reinsert chunk ingest=%s @ startpoint %s, rowcount %s, prevresults %s, dsLen %s" % (job['table'], job['startRow']+len(results), job['rowCount'] - len(results), len(results), job['dsLength']))
 				downloadQueue.put({'url': job['url'], 'dataset': job['dataset'], 'table': job['table'], 
 									'startRow': job['startRow'] + len(results), 'rowCount': job['rowCount'] - len(results), 
+				ew.log(EventWriter.INFO, "P: %s Reinsert chunk ingest=%s @ startpoint %s, rowcount %s, prevresults %s, dsLen %s" % (pid, job['table'], job['startRow']+len(results), job['rowCount'] - len(results), len(results), job['dsLength']))
 									'dsLength': job['dsLength'], 'schema': job['schema'], 'input': job['input']})
 
 			# Process each row into its base session and hit elements
@@ -211,14 +212,14 @@ class GABQInput(Script):
 			state['chunks'] += 1
 			state['hits'] += len(hits)
 			state['sessions'] += len(sessions)
-			ew.log(EventWriter.INFO, "End chunk ingest=%s @ %s, %s" % (job['table'], job['startRow'], len(sessions)))
+			ew.log(EventWriter.INFO, "P: %s End chunk ingest=%s @ %s, %s" % (pid, job['table'], job['startRow'], len(sessions)))
 
-		def downloadManager(downloadQueue, state, tokenLock, processingState, ew):
+		def downloadManager(downloadQueue, state, processingState, tokenLock, ew):
 			max_procs = 10
-			ew.log(EventWriter.INFO, "DM started")
-			# Keep spawning consumers until either the parent says there are no more job to be added to the queue 
-				# (by unsetting processingState) or the queue is empty.
 			while (processingState.is_set()) or (not downloadQueue.empty()):
+			ew.log(EventWriter.INFO, "DM started %s" % os.getpid())
+			# Keep spawning consumers until either the parent says there are no more job to be added to the queue
+				# (by unsetting state['processing']) or the queue is empty and until there are no running children.
 				if len(multiprocessing.active_children()) < max_procs:
 					try:
 						job = downloadQueue.get(True, 5)
@@ -226,8 +227,9 @@ class GABQInput(Script):
 						x.start()
 						downloadQueue.task_done()
 					except Empty:
-						pass
-			ew.log(EventWriter.INFO, "DM finshed")
+						time.sleep(1)
+			ew.log(EventWriter.INFO, "DM finished")
+			return
 
 		downloadQueue = multiprocessing.JoinableQueue()
 		dataManager = multiprocessing.Manager()
@@ -246,6 +248,7 @@ class GABQInput(Script):
 				state['token_refresh'] = {'client_id': input_item["oauth2_client_id"],
 												  'client_secret': input_item["oauth2_client_secret"]}
 				while True:
+					ew.log(EventWriter.ERROR, "Processing run started pid %s" % os.getpid())
 					google_bq_sess = OAuth2Session(state['token_refresh']['client_id'], scope=self._google_bq_ro_scope, token=state['token'])
 					views = {}
 					acctdata = pagingFetchData(ew, state, tokenLock, self._google_ga_base_url, 'nextPageToken', 'items')
