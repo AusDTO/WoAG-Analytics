@@ -11,8 +11,8 @@ APP_HOME = SPLUNK_HOME + "/etc/apps/GoogleAnalyticsBQ/"
 EGG_DIR = APP_HOME + "bin/"
 
 for filename in os.listdir(EGG_DIR):
-    if filename.endswith(".egg"):
-        sys.path.append(EGG_DIR + filename)
+	if filename.endswith(".egg"):
+		sys.path.append(EGG_DIR + filename)
 
 
 import requests, json, time, calendar, urllib, multiprocessing
@@ -216,7 +216,7 @@ class GABQInput(Script):
 			jobruncounter = 0
 			ew.log(EventWriter.INFO, "DM started %s" % os.getpid())
 			# Keep spawning consumers until either the parent says there are no more job to be added to the queue
-				# (by unsetting state['processing']) or the queue is empty and until there are no running children.
+				# (by unsetting processingState) or the queue is empty and until there are no running children.
 			while (processingState.is_set()) or (not downloadQueue.empty()) or (len(multiprocessing.active_children()) > 0):
 				if len(multiprocessing.active_children()) < max_procs:
 					try:
@@ -283,9 +283,9 @@ class GABQInput(Script):
 							if s.strip() in found_datasets:
 								datasets.append(s.strip())
 
-                    # Get the list of completed tables
+					# Get the list of completed tables
 					query_mode = {'count': 0}
-                    # Table seen to be completed when it has results in it - not a 'hard' verification against source data.
+					# Table seen to be completed when it has results in it - not a 'hard' verification against source data.
 					splunk_job = service.jobs.oneshot('| metadata type=sources index=* | where totalCount>0', **query_mode)
 					completedTables = []
 					for result in ResultsReader(splunk_job):
