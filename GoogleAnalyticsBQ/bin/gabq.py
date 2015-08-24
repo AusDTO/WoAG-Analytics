@@ -108,7 +108,9 @@ class GABQInput(Script):
 
 		def fetchData(ew, state, tokenLock, url, params = {}):
 			# build session
-			session = OAuth2Session(state['token_refresh']['client_id'], scope=self._google_bq_ro_scope, token=state['token'])
+			token_refresh = state['token_refresh']
+			token = state['token']
+			session = OAuth2Session(token_refresh['client_id'], scope=self._google_bq_ro_scope, token=token)
 			try:
 				response = session.get(url, params=params)
 				if response.status_code == 401:
@@ -116,8 +118,18 @@ class GABQInput(Script):
 					raise TokenExpiredError
 			except TokenExpiredError as e:
 				with tokenLock:
-					ew.log(EventWriter.ERROR, "Token has expired, refreshing")
-					state['token'] = session.refresh_token(self._google_oauth2_token_url, **state['token_refresh'])
+					# The tokenLock exists only to prevent multiple threads from attempting to cycle the token at once
+					# It is not designed to protect state['token']
+					t = time.time()
+					# Check to see if the token has been updated recently. If it has, do not update it.
+					if (t - state['token_updated']) > 60:
+						# Sometimes multiple threads will have expired tokens. Be very sure we only update it once.
+						ew.log(EventWriter.ERROR, "Token has expired, refreshing")
+						state['token'] = session.refresh_token(self._google_oauth2_token_url, **token_refresh)
+						state['token_updated'] = t
+					else:
+						token = state['token']
+						session = OAuth2Session(token_refresh['client_id'], scope=self._google_bq_ro_scope, token=token)
 				response = session.get(url, params=params)
 			except Exception, e:
 				exc_type, exc_value, exc_traceback = sys.exc_info()
@@ -254,6 +266,7 @@ class GABQInput(Script):
 										 u'refresh_token': input_item['oauth2_refresh_token'] }
 				state['token_refresh'] = {'client_id': input_item["oauth2_client_id"],
 												  'client_secret': input_item["oauth2_client_secret"]}
+				state['token_updated'] = 0
 				while True:
 					ew.log(EventWriter.ERROR, "Processing run started pid %s" % os.getpid())
 					google_bq_sess = OAuth2Session(state['token_refresh']['client_id'], scope=self._google_bq_ro_scope, token=state['token'])
