@@ -169,9 +169,9 @@ class GABQInput(Script):
 
 			# If the retreval was not a full set of records then push a new job back into the queue for the remaining records
 			if len(results) != int(job['rowCount']):
-				downloadQueue.put({'url': job['url'], 'dataset': job['dataset'], 'table': job['table'], 
-									'startRow': job['startRow'] + len(results), 'rowCount': job['rowCount'] - len(results), 
 				ew.log(EventWriter.INFO, "P: %s Reinsert chunk ingest=%s @ startpoint %s, rowcount %s, prevresults %s, dsLen %s" % (pid, job['table'], job['startRow']+len(results), job['rowCount'] - len(results), len(results), job['dsLength']))
+				downloadQueue.put({'url': job['url'], 'dataset': job['dataset'], 'table': job['table'],
+									'startRow': job['startRow'] + len(results), 'rowCount': job['rowCount'] - len(results),
 									'dsLength': job['dsLength'], 'schema': job['schema'], 'input': job['input']})
 
 			# Process each row into its base session and hit elements
@@ -216,10 +216,10 @@ class GABQInput(Script):
 
 		def downloadManager(downloadQueue, state, processingState, tokenLock, ew):
 			max_procs = 10
-			while (processingState.is_set()) or (not downloadQueue.empty()):
 			ew.log(EventWriter.INFO, "DM started %s" % os.getpid())
 			# Keep spawning consumers until either the parent says there are no more job to be added to the queue
 				# (by unsetting state['processing']) or the queue is empty and until there are no running children.
+			while (processingState.is_set()) or (not downloadQueue.empty()) or (len(multiprocessing.active_children()) > 0):
 				if len(multiprocessing.active_children()) < max_procs:
 					try:
 						job = downloadQueue.get(True, 5)
@@ -342,6 +342,7 @@ class GABQInput(Script):
 										# if we have not already started the DM then start it now
 										job = downloadQueue.get(True)
 										downloader(state, tokenLock, ew, job)
+										downloadQueue.task_done()
 										downloadManagerProcess.start()
 
 					# Tell the downloadManager there are no more jobs to be added.
@@ -352,11 +353,8 @@ class GABQInput(Script):
 					if downloadManagerProcess.is_alive():
 						downloadManagerProcess.join()
 					ew.log(EventWriter.INFO, "Finished ingest pass, tablecount=%s ingestcount=%s chunks=%s" % (gaTables, ingestCount, state['chunks']))
-
-					# Sleep for 30 minutes
-					for i in range(29):
-						# This is a space for later - will use core reporting to pull out additional information
-						time.sleep(60)
+					dataManager.shutdown()
+					time.sleep(1800)
 
 		except Exception, e:
 			exc_type, exc_value, exc_traceback = sys.exc_info()
