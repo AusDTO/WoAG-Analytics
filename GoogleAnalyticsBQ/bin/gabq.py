@@ -168,11 +168,14 @@ class GABQInput(Script):
 			# job = { url dataset table startRow rowCount dsLength schema input }
 			pid = os.getpid()
 			ew.log(EventWriter.INFO, "P: %s Start chunk ingest=%s @ %s" % (pid, job['table'], job['startRow']))
-			params = {'maxResults': job['rowCount'], 'startIndex': job['startRow']}
+			if job['dsLength'] - job['startRow'] > 1000:
+				params = {'maxResults': 1000, 'startIndex': job['startRow']}
+			else:
+				params = {'maxResults': job['dsLength'] - job['startRow'], 'startIndex': job['startRow']}
 			response = fetchData(ew, state, tokenLock, job['url'], params=params)
 			if response.status_code != 200:
 				ew.log(EventWriter.ERROR, "P: %s Query error: URL %s, startPoint %s, response code %s, body %s" %
-													( pid, job['url'], params, job['startRow'], response.status_code, response.text ) )
+											( pid, job['url'], params, job['startRow'], response.status_code, response.text ) )
 			dataDict = json.loads(response.text)
 			# Join the data chunk with the table schema
 			results = extractFields(job['schema'], dataDict)
@@ -180,10 +183,10 @@ class GABQInput(Script):
 			hits = []
 
 			# If the retreval was not a full set of records then push a new job back into the queue for the remaining records
-			if len(results) != int(job['rowCount']):
-				ew.log(EventWriter.INFO, "P: %s Reinsert chunk ingest=%s @ startpoint %s, rowcount %s, prevresults %s, dsLen %s" % (pid, job['table'], job['startRow']+len(results), job['rowCount'] - len(results), len(results), job['dsLength']))
+			if job['startRow'] + len(results) != job['dsLength']:
+				ew.log(EventWriter.INFO, "P: %s Reinsert chunk ingest=%s @ startpoint %s, prevresults %s, dsLen %s" % (pid, job['table'], job['startRow']+len(results), len(results), job['dsLength']))
 				downloadQueue.put({'url': job['url'], 'dataset': job['dataset'], 'table': job['table'],
-									'startRow': job['startRow'] + len(results), 'rowCount': job['rowCount'] - len(results),
+									'startRow': job['startRow'] + len(results),
 									'dsLength': job['dsLength'], 'schema': job['schema'], 'input': job['input']})
 
 			# Process each row into its base session and hit elements
@@ -222,13 +225,15 @@ class GABQInput(Script):
 
 			# update counters
 			ew.log(EventWriter.INFO, "P: %s End chunk ingest=%s @ %s, %s" % (pid, job['table'], job['startRow'], len(sessions)))
+			return
 
 		def downloadManager(downloadQueue, state, processingState, tokenLock, ew):
 			max_procs = 10
 			jobruncounter = 0
+			childProcesses = []
 			ew.log(EventWriter.INFO, "DM started %s" % os.getpid())
 			# Keep spawning consumers until either the parent says there are no more job to be added to the queue
-				# (by unsetting processingState) or the queue is empty and until there are no running children.
+			# (by unsetting processingState) or the queue is empty and until there are no running children.
 			while (processingState.is_set()) or (not downloadQueue.empty()) or (len(multiprocessing.active_children()) > 0):
 				if len(multiprocessing.active_children()) < max_procs:
 					try:
@@ -237,6 +242,7 @@ class GABQInput(Script):
 						job = downloadQueue.get(True, 5)
 						x = multiprocessing.Process(target=downloader, args=(state, tokenLock, ew, job))
 						x.start()
+						childProcesses.append(x)
 						downloadQueue.task_done()
 						jobruncounter += 1
 						# Every hundred jobs report on the queue state and process numbers.
@@ -247,10 +253,18 @@ class GABQInput(Script):
 							ew.log(EventWriter.INFO, "DM Status: %s jobs started. Children: %s" % (jobruncounter, children))
 					except Empty:
 						time.sleep(1)
+
+				# Explicitly join finished children.
+				for i in childProcesses[:]:
+					if not i.is_alive():
+						i.join()
+						childProcesses.remove(i)
+
 			ew.log(EventWriter.INFO, "DM finished, %s jobs total" % jobruncounter)
 			return
 
 		dataManager = multiprocessing.Manager()
+		mainProcess = os.getpid()
 		try:
 			downloadQueue = dataManager.Queue()
 			processingState = dataManager.Event()
@@ -267,8 +281,9 @@ class GABQInput(Script):
 				state['token_refresh'] = {'client_id': input_item["oauth2_client_id"],
 												  'client_secret': input_item["oauth2_client_secret"]}
 				state['token_updated'] = 0
+				state['verbose'] = input_item["verbose_logging"]
 				while True:
-					ew.log(EventWriter.ERROR, "Processing run started pid %s" % os.getpid())
+					ew.log(EventWriter.ERROR, "Processing run started pid %s" % mainProcess)
 					google_bq_sess = OAuth2Session(state['token_refresh']['client_id'], scope=self._google_bq_ro_scope, token=state['token'])
 					views = {}
 					acctdata = pagingFetchData(ew, state, tokenLock, self._google_ga_base_url, 'nextPageToken', 'items')
@@ -341,19 +356,10 @@ class GABQInput(Script):
 
 									bq_tables_url = bq_ds_url + "/" + table['tableReference']['tableId'] + "/data"
 									# Inject the dataset ID, page checkpoints and page counts into the download queue
-									# Rowcounter to be 1000
-									sr = 0
-									while sr < int(schemaDict['numRows']):
-										# job = { url dataset startRow rowCount dsLength schema input }
-										if (int(schemaDict['numRows']) - sr) < 1000:
-											downloadQueue.put({'url': bq_tables_url, 'dataset': dataset, 'table': table['id'],
-																	 'startRow': sr, 'rowCount': int(schemaDict['numRows']) - sr, 'dsLength': schemaDict['numRows'], 'schema': schemaDict['schema'],
-																	 'input': input_name})
-										else:
-											downloadQueue.put({'url': bq_tables_url, 'dataset': dataset, 'table': table['id'],
-																	 'startRow': sr, 'rowCount': 1000, 'dsLength': schemaDict['numRows'], 'schema': schemaDict['schema'],
-																	 'input': input_name})
-										sr += 1000
+									# job = { url dataset startRow dsLength schema input }
+									downloadQueue.put({'url': bq_tables_url, 'dataset': dataset, 'table': table['id'],
+														 'startRow': 0, 'dsLength': int(schemaDict['numRows']), 'schema': schemaDict['schema'],
+														 'input': input_name})
 									if ingestCount == 1:
 										# if we have not already started the DM then start it now
 										job = downloadQueue.get(True)
@@ -375,8 +381,11 @@ class GABQInput(Script):
 		except Exception, e:
 			exc_type, exc_value, exc_traceback = sys.exc_info()
 			for msg in traceback.format_exception(exc_type, exc_value, exc_traceback):
-				ew.log(EventWriter.ERROR, msg )
-			ew.log(EventWriter.ERROR, "Quitting")
+				ew.log(EventWriter.ERROR, "P: %s; %s" % (os.getpid(), msg))
+			if os.getpid() == mainProcess:
+				ew.log(EventWriter.ERROR, "P: %s Quitting (Main process)" % os.getpid())
+			else:
+				ew.log(EventWriter.ERROR, "P: %s Quitting" % os.getpid())
 
 if __name__ == "__main__":
 	sys.exit(GABQInput().run(sys.argv))
