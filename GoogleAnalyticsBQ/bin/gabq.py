@@ -281,7 +281,6 @@ class GABQInput(Script):
 				state['token_refresh'] = {'client_id': input_item["oauth2_client_id"],
 												  'client_secret': input_item["oauth2_client_secret"]}
 				state['token_updated'] = 0
-				state['verbose'] = input_item["verbose_logging"]
 				while True:
 					ew.log(EventWriter.ERROR, "Processing run started pid %s" % mainProcess)
 					google_bq_sess = OAuth2Session(state['token_refresh']['client_id'], scope=self._google_bq_ro_scope, token=state['token'])
