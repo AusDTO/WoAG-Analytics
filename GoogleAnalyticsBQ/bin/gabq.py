@@ -84,6 +84,7 @@ class GABQInput(Script):
 
 			results = []
 			fields = unpackSchema(schemaDict['fields'])
+			if 'rows' not in dataDict.keys(): return None
 			for f in dataDict['rows']:
 				results.append(unpackData(fields, f['f']))
 			return results
@@ -171,11 +172,14 @@ class GABQInput(Script):
 			params = {'maxResults': rowCount, 'startIndex': startRow}
 			response = fetchData(ew, state, tokenLock, job['url'], params=params)
 			if response.status_code != 200:
-				ew.log(EventWriter.ERROR, "P: %s Query error: URL %s, startPoint %s, response code %s, body %s" %
+				ew.log(EventWriter.ERROR, "P: %s Query error: URL %s, params %s, startPoint %s, response code %s, body %s" %
 											( pid, job['url'], params, startRow, response.status_code, response.text ) )
 			dataDict = json.loads(response.text)
 			# Join the data chunk with the table schema
 			results = extractFields(job['schema'], dataDict)
+			if results is None:
+				ew.log(EventWriter.ERROR, "P: %s Query error: URL %s, params %s, startPoint %s, " % ( pid, job['url'], params, startRow) )
+				return
 			sessions = []
 			hits = []
 
@@ -214,16 +218,16 @@ class GABQInput(Script):
 									time=hit['hitTime']))
 
 			# If the retreval was not a full set of records then recurse until the set is completed
-			if startRow + len(results) != rowCount:
+			sessionCount = len(sessions)
+			resultCount = len(results)
+			if resultCount != rowCount:
 				# See if we can free some memory.
 				del sessions
 				del hits
 				del results
-				del response
-				del dataDict
-				downloader(state, tokenLock, ew, job, startRow +len(results), rowCount - len(results))
+				downloader(state, tokenLock, ew, job, startRow +resultCount, rowCount - resultCount)
 
-			ew.log(EventWriter.INFO, "P: %s End chunk ingest=%s @ %s, %s" % (pid, job['table'], startRow, len(sessions)))
+			ew.log(EventWriter.INFO, "P: %s End chunk ingest=%s @ %s, %s" % (pid, job['table'], startRow, sessionCount))
 			return
 
 		def downloadManager(downloadQueue, state, processingState, tokenLock, ew, worker_count = 10):
