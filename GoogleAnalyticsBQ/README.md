@@ -11,7 +11,7 @@ Prerequisites:
 
 Setting up:
 * Install the plugin on the Splunk server.
-* Run the "get_tokens.py" script on your splunk server. 
+* Run the "get_tokens.py" script on your splunk server.
     * You need the project client ID and secret
     * Copy the URL into a browser, login as an account that can read the data from your BQ project, and approve the request
     * Paste the code back into the script.
@@ -40,10 +40,11 @@ Start table ingest=dto-analytics:71601106.ga_sessions_20140827
 
 Finished table ingest=dto-analytics:71601106.ga_sessions_20140826 chunkcount=28 hitcount=139949 sessioncount=81489
 
-hitcount and sessioncount are how many hits and sessions were in that day's logs, and chunkcount gives you an idea of how large the data transfer was - each chunk is around 20Mb. On the test site with roughly 140-200k hits / 55-80k sessions per day, the data size was about 500Mb. 
+hitcount and sessioncount are how many hits and sessions were in that day's logs, and chunkcount gives you an idea of how large the data transfer was - each chunk is around 20Mb. On the test site with roughly 140-200k hits / 55-80k sessions per day, the data size was about 500Mb.
 
 An input created with dataset=* will consume any gap dataset it finds without discrimination, and will continue until there are none left.
 
-If, for some reason, you need to reload a day's logs, you need to know the table name, dataset name (same as the viewID) and project name. Once you do, run "index=<whatever> source=projectname:datasetname.tablename | delete". On the next pass the input will collect the data again.
+If, for some reason, you need to reload a day's logs, you need to know the table name, dataset name (same as the viewID) and project name. Once you do, run "index=<whatever> source=projectname:datasetname.tablename | delete". Then create a lookup called "forceupdate.csv" (doesn't matter what app) with a single column (doesn't matter what name). Include the datasets you want to reindex as the values of the column.
+On the next pass the input will collect the data again and delete the lookup.
 
-If the input says it can't see any datasets, make sure the account you grabbed tokens from can actually use that project by going into the BQ console and checking. If, for example, the account previously had access but currently does not, I found that BQ returned 200 OK for the request for datasets against the project but did not show any datasets. 
+If the input says it can't see any datasets, make sure the account you grabbed tokens from can actually use that project by going into the BQ console and checking. If, for example, the account previously had access but currently does not, I found that BQ returned 200 OK for the request for datasets against the project but did not show any datasets.
