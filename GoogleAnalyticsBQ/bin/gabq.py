@@ -47,8 +47,8 @@ class GABQInput(Script):
 		scheme.add_argument(Argument(name="oauth2_client_id", description="OAuth2 Client ID", required_on_create=True))
 		scheme.add_argument(Argument(name="oauth2_client_secret", description="OAuth2 Client Secret", required_on_create=True))
 		scheme.add_argument(Argument(name="https_proxy", description="HTTPS proxy (blank if none)"))
-		scheme.add_argument(Argument(name="index_errors", description="Index any errors : true | false"))
-		scheme.add_argument(Argument(name="backoff_time", description="How long to wait after an error (seconds)"))
+		scheme.add_argument(Argument(name="verbose_logging", description="Verbose logging: true | false"))
+		scheme.add_argument(Argument(name="worker_count", description="Number of worker processes (def: 10)"))
 		return scheme
 
 	def validate_input(self, inputs):
@@ -84,6 +84,7 @@ class GABQInput(Script):
 
 			results = []
 			fields = unpackSchema(schemaDict['fields'])
+			if 'rows' not in dataDict.keys(): return None
 			for f in dataDict['rows']:
 				results.append(unpackData(fields, f['f']))
 			return results
@@ -164,30 +165,23 @@ class GABQInput(Script):
 					ew.log(EventWriter.ERROR, "Query error: %s did not return expected field %s, saw %s" % (url, item, str(response.keys())) )
 			return result
 
-		def downloader(state, tokenLock, ew, job):
+		def downloader(state, tokenLock, ew, job, startRow, rowCount):
 			# job = { url dataset table startRow rowCount dsLength schema input }
 			pid = os.getpid()
-			ew.log(EventWriter.INFO, "P: %s Start chunk ingest=%s @ %s" % (pid, job['table'], job['startRow']))
-			if job['dsLength'] - job['startRow'] > 1000:
-				params = {'maxResults': 1000, 'startIndex': job['startRow']}
-			else:
-				params = {'maxResults': job['dsLength'] - job['startRow'], 'startIndex': job['startRow']}
+			ew.log(EventWriter.INFO, "P: %s Start chunk ingest=%s @ %s" % (pid, job['table'], startRow))
+			params = {'maxResults': rowCount, 'startIndex': startRow}
 			response = fetchData(ew, state, tokenLock, job['url'], params=params)
 			if response.status_code != 200:
-				ew.log(EventWriter.ERROR, "P: %s Query error: URL %s, startPoint %s, response code %s, body %s" %
-											( pid, job['url'], params, job['startRow'], response.status_code, response.text ) )
+				ew.log(EventWriter.ERROR, "P: %s Query error: URL %s, params %s, startPoint %s, response code %s, body %s" %
+											( pid, job['url'], params, startRow, response.status_code, response.text ) )
 			dataDict = json.loads(response.text)
 			# Join the data chunk with the table schema
 			results = extractFields(job['schema'], dataDict)
+			if results is None:
+				ew.log(EventWriter.ERROR, "P: %s Query error: URL %s, params %s, startPoint %s, " % ( pid, job['url'], params, startRow) )
+				return
 			sessions = []
 			hits = []
-
-			# If the retreval was not a full set of records then push a new job back into the queue for the remaining records
-			if job['startRow'] + len(results) != job['dsLength']:
-				ew.log(EventWriter.INFO, "P: %s Reinsert chunk ingest=%s @ startpoint %s, prevresults %s, dsLen %s" % (pid, job['table'], job['startRow']+len(results), len(results), job['dsLength']))
-				downloadQueue.put({'url': job['url'], 'dataset': job['dataset'], 'table': job['table'],
-									'startRow': job['startRow'] + len(results),
-									'dsLength': job['dsLength'], 'schema': job['schema'], 'input': job['input']})
 
 			# Process each row into its base session and hit elements
 			for r in results:
@@ -223,27 +217,49 @@ class GABQInput(Script):
 									stanza=job['input'],
 									time=hit['hitTime']))
 
-			# update counters
-			ew.log(EventWriter.INFO, "P: %s End chunk ingest=%s @ %s, %s" % (pid, job['table'], job['startRow'], len(sessions)))
+			# If the retreval was not a full set of records then recurse until the set is completed
+			sessionCount = len(sessions)
+			resultCount = len(results)
+			if resultCount != rowCount:
+				# See if we can free some memory.
+				del sessions
+				del hits
+				del results
+				downloader(state, tokenLock, ew, job, startRow +resultCount, rowCount - resultCount)
+
+			ew.log(EventWriter.INFO, "P: %s End chunk ingest=%s @ %s, %s" % (pid, job['table'], startRow, sessionCount))
 			return
 
-		def downloadManager(downloadQueue, state, processingState, tokenLock, ew):
-			max_procs = 10
+		def downloadManager(downloadQueue, state, processingState, tokenLock, ew, worker_count = 10):
 			jobruncounter = 0
+			firstJob = True
 			childProcesses = []
 			ew.log(EventWriter.INFO, "DM started %s" % os.getpid())
 			# Keep spawning consumers until either the parent says there are no more job to be added to the queue
 			# (by unsetting processingState) or the queue is empty and until there are no running children.
 			while (processingState.is_set()) or (not downloadQueue.empty()) or (len(multiprocessing.active_children()) > 0):
-				if len(multiprocessing.active_children()) < max_procs:
-					try:
-						# This will wait at most 5 seconds for a job; otherwise raise Empty.
-						# Need to do this to track completion notification from the main process.
-						job = downloadQueue.get(True, 5)
-						x = multiprocessing.Process(target=downloader, args=(state, tokenLock, ew, job))
-						x.start()
-						childProcesses.append(x)
-						downloadQueue.task_done()
+				try:
+					# This will wait at most 5 seconds for a job; otherwise raise Empty.
+					# Need to do this to track completion notification from the main process.
+					# job = { url dataset table dsLength schema input }
+					job = downloadQueue.get(True, 5)
+					startRow = 0
+					while startRow < job['dsLength']:
+						# Wait until we are below the worker count limit
+						while len(multiprocessing.active_children()) > worker_count - 1: time.sleep(1)
+						# Start a job
+						# Run the first job inline. This forces the EW class to initialise the output correctly for Splunk.
+						if startRow + 1000 > job['dsLength']:
+							rowCount = job['dsLength']
+						else:
+							rowCount = 1000
+						if firstJob:
+							downloader(state, tokenLock, ew, job, startRow, rowCount)
+							firstJob = False
+						else:
+							x = multiprocessing.Process(target=downloader, args=(state, tokenLock, ew, job, startRow, rowCount))
+							x.start()
+						startRow += 1000
 						jobruncounter += 1
 						# Every hundred jobs report on the queue state and process numbers.
 						if jobruncounter % 100 == 0:
@@ -251,15 +267,11 @@ class GABQInput(Script):
 							for i in multiprocessing.active_children():
 								children.append(i.pid)
 							ew.log(EventWriter.INFO, "DM Status: %s jobs started. Children: %s" % (jobruncounter, children))
-					except Empty:
-						time.sleep(1)
+					# Finish the job
+					downloadQueue.task_done()
 
-				# Explicitly join finished children.
-				for i in childProcesses[:]:
-					if not i.is_alive():
-						i.join()
-						childProcesses.remove(i)
-
+				except Empty:
+					time.sleep(1)
 			ew.log(EventWriter.INFO, "DM finished, %s jobs total" % jobruncounter)
 			return
 
@@ -318,10 +330,20 @@ class GABQInput(Script):
 					for result in ResultsReader(splunk_job):
 						completedTables.append(result['source'])
 
+					# Remove datasets which are being forced in
+					splunk_job = service.jobs.oneshot('| inputlookup forceupload.csv', **query_mode)
+					for result in ResultsReader(splunk_job):
+						if result[result.keys()[0]] in completedTables:
+							completedTables.remove(result[result.keys()[0]])
+
 					# Process each dataset
 					gaTables = 0
 					ingestCount = 0
-					downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, processingState, tokenLock, ew))
+					if "worker_count" in input_item.keys():
+						downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, processingState, tokenLock, ew, int(input_item['worker_count'])))
+					else:
+						downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, processingState, tokenLock, ew))
+					downloadManagerProcess.start()
 					for dataset in datasets:
 						# Set processing timezone
 						try:
@@ -357,14 +379,8 @@ class GABQInput(Script):
 									# Inject the dataset ID, page checkpoints and page counts into the download queue
 									# job = { url dataset startRow dsLength schema input }
 									downloadQueue.put({'url': bq_tables_url, 'dataset': dataset, 'table': table['id'],
-														 'startRow': 0, 'dsLength': int(schemaDict['numRows']), 'schema': schemaDict['schema'],
+														 'dsLength': int(schemaDict['numRows']), 'schema': schemaDict['schema'],
 														 'input': input_name})
-									if ingestCount == 1:
-										# if we have not already started the DM then start it now
-										job = downloadQueue.get(True)
-										downloader(state, tokenLock, ew, job)
-										downloadQueue.task_done()
-										downloadManagerProcess.start()
 
 					# Tell the downloadManager there are no more jobs to be added.
 					processingState.clear()
@@ -375,6 +391,8 @@ class GABQInput(Script):
 						downloadManagerProcess.join()
 					ew.log(EventWriter.INFO, "Finished ingest pass, tablecount=%s ingestcount=%s" % (gaTables, ingestCount))
 					dataManager.shutdown()
+					# Ensure any forced jobs are cleared.
+					splunk_job = service.jobs.oneshot('| outputlookup forceupload.csv create_empty=false', **query_mode)
 					time.sleep(1800)
 
 		except Exception, e:
