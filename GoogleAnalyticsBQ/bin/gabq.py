@@ -275,25 +275,23 @@ class GABQInput(Script):
 			ew.log(EventWriter.INFO, "DM finished, %s jobs total" % jobruncounter)
 			return
 
-		dataManager = multiprocessing.Manager()
 		mainProcess = os.getpid()
 		try:
-			downloadQueue = dataManager.Queue()
-			processingState = dataManager.Event()
-			processingState.set()
-			state = dataManager.dict()
-			tokenLock = multiprocessing.Lock()
 			args = {'host':'localhost','port':inputs.metadata['server_uri'][18:],'token':inputs.metadata['session_key']}
-			service = Service(**args)
 			for input_name, input_item in inputs.inputs.iteritems():
-				state['token'] = { u'access_token': input_item["oauth2_access_token"],
-										 u'token_type': 'Bearer',
-										 u'expires_in': '60',
-										 u'refresh_token': input_item['oauth2_refresh_token'] }
-				state['token_refresh'] = {'client_id': input_item["oauth2_client_id"],
-												  'client_secret': input_item["oauth2_client_secret"]}
-				state['token_updated'] = 0
 				while True:
+					service = Service(**args)
+					dataManager = multiprocessing.Manager()
+					downloadQueue = dataManager.Queue()
+					processingState = dataManager.Event()
+					processingState.set()
+					state = dataManager.dict()
+					tokenLock = multiprocessing.Lock()
+					state['token'] = { u'access_token': input_item["oauth2_access_token"], u'token_type': 'Bearer',
+										 u'expires_in': '60', u'refresh_token': input_item['oauth2_refresh_token'] }
+					state['token_refresh'] = {'client_id': input_item["oauth2_client_id"],
+											  'client_secret': input_item["oauth2_client_secret"]}
+					state['token_updated'] = 0
 					ew.log(EventWriter.ERROR, "Processing run started pid %s" % mainProcess)
 					google_bq_sess = OAuth2Session(state['token_refresh']['client_id'], scope=self._google_bq_ro_scope, token=state['token'])
 					views = {}
