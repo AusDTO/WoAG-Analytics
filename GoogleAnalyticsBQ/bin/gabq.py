@@ -301,14 +301,6 @@ class GABQInput(Script):
 		try:
 			args = {'host':'localhost','port':inputs.metadata['server_uri'][18:],'token':inputs.metadata['session_key']}
 			for input_name, input_item in inputs.inputs.iteritems():
-				if 'volume_limit' in input_item.keys():
-					volumeLimit = int(input_item['volume_limit'])
-				else:
-					volumeLimit=0
-				if 'licencing_host' in input_item.keys():
-					licencingHost = input_item['licencing_host']
-				else:
-					licencingHost="*"
 				while True:
 					service = Service(**args)
 					dataManager = multiprocessing.Manager()
@@ -323,6 +315,14 @@ class GABQInput(Script):
 											  'client_secret': input_item["oauth2_client_secret"]}
 					state['token_updated'] = 0
 					ew.log(EventWriter.ERROR, "Processing run started pid %s" % mainProcess)
+					if 'volume_limit' in input_item.keys():
+						volumeLimit = int(input_item['volume_limit'])
+					else:
+						volumeLimit=0
+					if 'licencing_host' in input_item.keys():
+						licencingHost = input_item['licencing_host']
+					else:
+						licencingHost="*"
 					google_bq_sess = OAuth2Session(state['token_refresh']['client_id'], scope=self._google_bq_ro_scope, token=state['token'])
 					views = {}
 					acctdata = pagingFetchData(ew, state, tokenLock, self._google_ga_base_url, 'nextPageToken', 'items')
