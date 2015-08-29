@@ -46,7 +46,8 @@ class GABQInput(Script):
 		scheme.add_argument(Argument(name="oauth2_refresh_token", description="OAuth2 Refresh Token", required_on_create=True))
 		scheme.add_argument(Argument(name="oauth2_client_id", description="OAuth2 Client ID", required_on_create=True))
 		scheme.add_argument(Argument(name="oauth2_client_secret", description="OAuth2 Client Secret", required_on_create=True))
-		scheme.add_argument(Argument(name="https_proxy", description="HTTPS proxy (blank if none)"))
+		scheme.add_argument(Argument(name="volume_limit", description="Maximum amount of data to ingest in a day, in bytes - soft limit (default: unlimited)"))
+		scheme.add_argument(Argument(name="licencing_host", description="Licencing host to query for volume limiter (default: *)"))
 		scheme.add_argument(Argument(name="verbose_logging", description="Verbose logging: true | false"))
 		scheme.add_argument(Argument(name="worker_count", description="Number of worker processes (def: 10)"))
 		return scheme
@@ -230,10 +231,27 @@ class GABQInput(Script):
 			ew.log(EventWriter.INFO, "P: %s End chunk ingest=%s @ %s, %s" % (pid, job['table'], startRow, sessionCount))
 			return
 
-		def downloadManager(downloadQueue, state, processingState, tokenLock, ew, worker_count = 10):
+		def hasExceededVolumeLimit(volumeLimit, licencingHost, splunkSvc, ew):
+			if volumeLimit == 0: return False
+
+			query_mode = {'count': 0, 'latest_time': 'now', 'earliest_time': time.strftime("%Y-%m-%dT00:00:00", time.gmtime(time.time())) }
+			spl = 'search index=_internal source=*license_usage.log* type=Usage host=%s | stats sum(b) AS volume_bytes' % licencingHost
+			splunk_job = splunkSvc.jobs.oneshot(spl, **query_mode)
+			ew.log(EventWriter.INFO, "hasExceededVolumeLimit %s '%s' %s" % (volumeLimit, spl, query_mode))
+			for result in ResultsReader(splunk_job):
+				ew.log(EventWriter.INFO, "hasExceededVolumeLimit vb %s" % (result['volume_bytes']))
+				if int(result['volume_bytes']) > volumeLimit:
+					return True
+			return False
+
+		def downloadManager(downloadQueue, state, processingState, tokenLock, ew, worker_count, volumeLimit, licencingHost, splunkSvc):
 			jobruncounter = 0
 			firstJob = True
 			childProcesses = []
+			# Check to see if we have exceeded the volume limit for today before proceeding
+			if hasExceededVolumeLimit(volumeLimit, licencingHost, splunkSvc, ew):
+				ew.log(EventWriter.INFO, "DM not starting, volume limit exceeded")
+				return
 			ew.log(EventWriter.INFO, "DM started %s" % os.getpid())
 			# Keep spawning consumers until either the parent says there are no more job to be added to the queue
 			# (by unsetting processingState) or the queue is empty and until there are no running children.
@@ -250,7 +268,7 @@ class GABQInput(Script):
 						# Start a job
 						# Run the first job inline. This forces the EW class to initialise the output correctly for Splunk.
 						if startRow + 1000 > job['dsLength']:
-							rowCount = job['dsLength']
+							rowCount = job['dsLength'] - startRow
 						else:
 							rowCount = 1000
 						if firstJob:
@@ -269,7 +287,11 @@ class GABQInput(Script):
 							ew.log(EventWriter.INFO, "DM Status: %s jobs started. Children: %s" % (jobruncounter, children))
 					# Finish the job
 					downloadQueue.task_done()
-
+					if hasExceededVolumeLimit(volumeLimit, licencingHost, splunkSvc, ew):
+						# No further processing. Wait for all processes to complete.
+						ew.log(EventWriter.INFO, "DM finished, %s jobs total, volume limit reached" % jobruncounter)
+						while len(multiprocessing.active_children()) > 0: time.sleep(1)
+						return
 				except Empty:
 					time.sleep(1)
 			ew.log(EventWriter.INFO, "DM finished, %s jobs total" % jobruncounter)
@@ -293,6 +315,14 @@ class GABQInput(Script):
 											  'client_secret': input_item["oauth2_client_secret"]}
 					state['token_updated'] = 0
 					ew.log(EventWriter.ERROR, "Processing run started pid %s" % mainProcess)
+					if 'volume_limit' in input_item.keys():
+						volumeLimit = int(input_item['volume_limit'])
+					else:
+						volumeLimit=0
+					if 'licencing_host' in input_item.keys():
+						licencingHost = input_item['licencing_host']
+					else:
+						licencingHost="*"
 					google_bq_sess = OAuth2Session(state['token_refresh']['client_id'], scope=self._google_bq_ro_scope, token=state['token'])
 					views = {}
 					acctdata = pagingFetchData(ew, state, tokenLock, self._google_ga_base_url, 'nextPageToken', 'items')
@@ -338,9 +368,9 @@ class GABQInput(Script):
 					gaTables = 0
 					ingestCount = 0
 					if "worker_count" in input_item.keys():
-						downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, processingState, tokenLock, ew, int(input_item['worker_count'])))
+						downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, processingState, tokenLock, ew, int(input_item['worker_count']), volumeLimit, licencingHost, service))
 					else:
-						downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, processingState, tokenLock, ew))
+						downloadManagerProcess = multiprocessing.Process(target=downloadManager, args=(downloadQueue, state, processingState, tokenLock, ew, 10, volumeLimit, licencingHost, service))
 					downloadManagerProcess.start()
 					for dataset in datasets:
 						# Set processing timezone
