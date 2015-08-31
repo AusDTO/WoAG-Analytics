@@ -237,9 +237,7 @@ class GABQInput(Script):
 			query_mode = {'count': 0, 'latest_time': 'now', 'earliest_time': time.strftime("%Y-%m-%dT00:00:00", time.gmtime(time.time())) }
 			spl = 'search index=_internal source=*license_usage.log* type=Usage host=%s | stats sum(b) AS volume_bytes' % licencingHost
 			splunk_job = splunkSvc.jobs.oneshot(spl, **query_mode)
-			ew.log(EventWriter.INFO, "hasExceededVolumeLimit %s '%s' %s" % (volumeLimit, spl, query_mode))
 			for result in ResultsReader(splunk_job):
-				ew.log(EventWriter.INFO, "hasExceededVolumeLimit vb %s" % (result['volume_bytes']))
 				if int(result['volume_bytes']) > volumeLimit:
 					return True
 			return False
