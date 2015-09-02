@@ -289,6 +289,13 @@ class GABQInput(Script):
 						# No further processing. Wait for all processes to complete.
 						ew.log(EventWriter.INFO, "DM finished, %s jobs total, volume limit reached" % jobruncounter)
 						while len(multiprocessing.active_children()) > 0: time.sleep(1)
+						# Wait for main process job insertion to complete
+						while processingState.is_set():
+							time.sleep(1)
+						# Empty the queue
+						while not downloadQueue.empty():
+							downloadQueue.get(False)
+							downloadQueue.task_done()
 						return
 				except Empty:
 					time.sleep(1)
