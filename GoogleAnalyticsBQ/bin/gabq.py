@@ -248,7 +248,14 @@ class GABQInput(Script):
 			childProcesses = []
 			# Check to see if we have exceeded the volume limit for today before proceeding
 			if hasExceededVolumeLimit(volumeLimit, licencingHost, splunkSvc, ew):
-				ew.log(EventWriter.INFO, "DM not starting, volume limit exceeded")
+				ew.log(EventWriter.INFO, "DM not processing jobs, volume limit exceeded")
+				# Wait for main process job insertion to complete
+				while processingState.is_set():
+					time.sleep(1)
+				# Empty the queue
+				while not downloadQueue.empty():
+					downloadQueue.get(False)
+					downloadQueue.task_done()
 				return
 			ew.log(EventWriter.INFO, "DM started %s" % os.getpid())
 			# Keep spawning consumers until either the parent says there are no more job to be added to the queue
@@ -302,6 +309,8 @@ class GABQInput(Script):
 			ew.log(EventWriter.INFO, "DM finished, %s jobs total" % jobruncounter)
 			return
 
+		sys.stdout.write("<stream>")
+		ew.header_written = True
 		mainProcess = os.getpid()
 		try:
 			args = {'host':'localhost','port':inputs.metadata['server_uri'][18:],'token':inputs.metadata['session_key']}
