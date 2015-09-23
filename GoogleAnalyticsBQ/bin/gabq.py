@@ -359,10 +359,19 @@ class GABQInput(Script):
 					if input_item['bigquery_dataset'] == '*':
 						datasets = found_datasets
 					else:
-						datasets = []
+						if input_item['bigquery_dataset'][0] == "*":
+							# Either everything or a reduction set
+							# If a reduction set then everything should start with '-'
+							datasets = found_datasets
+						else:
+							datasets = []
 						for s in input_item['bigquery_dataset'].split(','):
-							if s.strip() in found_datasets:
-								datasets.append(s.strip())
+							if s.strip()[0] == "-":
+								if s.strip()[1:] in datasets:
+									datasets.remove(s.strip()[1:])
+							else:
+								if s.strip() in found_datasets:
+									datasets.append(s.strip())
 
 					# Get the list of completed tables
 					query_mode = {'count': 0}
