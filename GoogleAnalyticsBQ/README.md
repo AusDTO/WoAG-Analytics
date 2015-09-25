@@ -44,7 +44,7 @@ hitcount and sessioncount are how many hits and sessions were in that day's logs
 
 An input created with dataset=* will consume any gap dataset it finds without discrimination, and will continue until there are none left.
 
-If, for some reason, you need to reload a day's logs, you need to know the table name, dataset name (same as the viewID) and project name. Once you do, run "index=<whatever> source=projectname:datasetname.tablename | delete". Then create a lookup called "forceupdate.csv" (doesn't matter what app) with a single column (doesn't matter what name). Include the datasets you want to reindex as the values of the column.
+If, for some reason, you need to reload a day's logs, you need to know the table name, dataset name (same as the viewID) and project name. Once you do, run "index=<whatever> source=projectname:datasetname.tablename | delete". Then create a lookup called "forceupload.csv" (doesn't matter what app) with a single column (doesn't matter what name). Include the datasets you want to reindex as the values of the column.
 On the next pass the input will collect the data again and delete the lookup.
 
 If the input says it can't see any datasets, make sure the account you grabbed tokens from can actually use that project by going into the BQ console and checking. If, for example, the account previously had access but currently does not, I found that BQ returned 200 OK for the request for datasets against the project but did not show any datasets.
